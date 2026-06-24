@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/icon.svg">
+  <title>SannMusic</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+  <!-- ═══ Login Screen ═══ -->
+  <div id="login-screen" class="screen">
+    <div class="login-card">
+      <div class="login-logo">
+        <svg viewBox="0 0 48 48" width="76" height="76" aria-hidden="true">
+          <defs><linearGradient id="lgLogin" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2BE995"/><stop offset="1" stop-color="#10B86B"/></linearGradient></defs>
+          <rect x="2" y="2" width="44" height="44" rx="13" fill="url(#lgLogin)"/>
+          <g fill="#06140E"><rect x="11" y="18" width="4.2" height="12" rx="2.1"/><rect x="17.4" y="13" width="4.2" height="22" rx="2.1"/><rect x="23.8" y="9" width="4.2" height="30" rx="2.1"/><rect x="30.2" y="16" width="4.2" height="16" rx="2.1"/><rect x="36.6" y="20" width="4.2" height="8" rx="2.1"/></g>
+        </svg>
+      </div>
+      <h1 class="login-title">SannMusic</h1>
+      <p class="login-subtitle">File Server</p>
+
+      <div class="login-fields">
+        <label class="field">
+          <span class="field-label">Server URL</span>
+          <input type="url" id="server-url" class="input" placeholder="http://sannserver:8080" autocomplete="url" inputmode="url" spellcheck="false">
+        </label>
+        <label class="field">
+          <span class="field-label">Username</span>
+          <input type="text" id="username" class="input" placeholder="Username" autocomplete="username" spellcheck="false">
+        </label>
+        <label class="field">
+          <span class="field-label">Password</span>
+          <input type="password" id="password" class="input" placeholder="Password" autocomplete="current-password">
+        </label>
+      </div>
+
+      <div id="login-error" class="login-error" role="alert"></div>
+
+      <button id="connect-btn" class="btn-primary">Connect</button>
+    </div>
+  </div>
+
+  <!-- ═══ Browser Screen ═══ -->
+  <div id="browser-screen" class="screen">
+
+    <!-- Global Top Bar (logo · home · search · actions) -->
+    <header id="topbar" class="topbar">
+      <div class="topbar-left">
+        <button id="topbar-logo" class="topbar-logo" aria-label="SannMusic — Home">
+          <svg viewBox="0 0 48 48" width="32" height="32" aria-hidden="true">
+            <defs><linearGradient id="lgTop" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2BE995"/><stop offset="1" stop-color="#10B86B"/></linearGradient></defs>
+            <rect x="2" y="2" width="44" height="44" rx="13" fill="url(#lgTop)"/>
+            <g fill="#06140E"><rect x="11" y="18" width="4.2" height="12" rx="2.1"/><rect x="17.4" y="13" width="4.2" height="22" rx="2.1"/><rect x="23.8" y="9" width="4.2" height="30" rx="2.1"/><rect x="30.2" y="16" width="4.2" height="16" rx="2.1"/><rect x="36.6" y="20" width="4.2" height="8" rx="2.1"/></g>
+          </svg>
+          <span class="topbar-wordmark"><b>Sann</b><span class="logo-accent">Music</span></span>
+        </button>
+      </div>
+      <div class="topbar-center">
+        <button id="topbar-home" class="topbar-home active" aria-label="Home" title="Home">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        </button>
+        <div class="topbar-search">
+          <svg class="topbar-search-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input id="global-search" class="topbar-search-input" type="search" placeholder="What do you want to play?" autocomplete="off" spellcheck="false" aria-label="Search">
+          <button id="topbar-search-clear" class="topbar-search-clear" aria-label="Clear search" style="display:none">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <button id="btn-settings" class="tb-btn" aria-label="Settings" title="Settings" style="display:none">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+        <button id="btn-toolbar" class="tb-btn" aria-label="Upload" title="Upload" style="display:none">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="app-layout">
+      <!-- Sidebar backdrop for mobile -->
+      <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
+
+      <!-- Left Sidebar -->
+      <nav id="sidebar" class="sidebar">
+        <div class="sidebar-nav">
+          <button class="nav-item active" data-tab="home" title="Your Library">
+            <svg class="nav-icon" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+            <span class="nav-label">Your Library</span>
+          </button>
+          <button class="nav-item" data-tab="playlists" title="Playlists">
+            <svg class="nav-icon" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 18V5l12-2v13"/>
+              <circle cx="6" cy="18" r="3"/>
+              <circle cx="18" cy="16" r="3"/>
+            </svg>
+            <span class="nav-label">Playlists</span>
+          </button>
+
+          <button class="nav-item" data-tab="favorites" title="Favorites">
+            <svg class="nav-icon" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+            </svg>
+            <span class="nav-label">Favorites</span>
+          </button>
+
+          <button class="nav-item" data-tab="folders" title="Folders">
+            <svg class="nav-icon" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            <span class="nav-label">Folders</span>
+          </button>
+        </div>
+      </nav>
+
+      <!-- Main Panel -->
+      <div class="main-panel">
+        <main id="main-content" class="main-content">
+          <!-- Selection batch bar -->
+          <div id="selection-bar" class="selection-bar">
+            <span id="selection-count" class="selection-count">0 selected</span>
+            <button id="selection-playlist-btn" class="selection-btn">Add to Playlist</button>
+            <button id="selection-delete-btn" class="selection-btn selection-btn-danger">Delete</button>
+            <button id="selection-cancel-btn" class="selection-btn">Cancel</button>
+          </div>
+
+          <div id="tab-home" class="tab-content active">
+            <div id="home-view" class="home-view"></div>
+          </div>
+          <div id="tab-playlists" class="tab-content">
+            <div id="playlists-view" class="playlists-view"></div>
+          </div>
+          <div id="tab-folders" class="tab-content">
+            <div id="items-list" class="items-list"></div>
+          </div>
+          <div id="tab-favorites" class="tab-content">
+            <div id="favorites-view" class="favorites-view"></div>
+          </div>
+
+          <!-- Search results overlay -->
+          <div id="search-overlay" class="search-overlay">
+            <div id="search-results" class="search-results"></div>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- Now Playing Bar -->
+    <footer id="now-playing" class="now-playing">
+      <div class="np-left">
+        <img id="np-cover" class="np-cover" src="" alt="">
+        <div id="np-info" class="np-info">
+          <span id="np-title" class="np-title"></span>
+          <span id="np-artist" class="np-artist"></span>
+        </div>
+      </div>
+      <div class="np-center">
+        <div class="np-controls">
+          <button id="np-shuffle-btn" class="np-btn np-btn-sm" aria-label="Shuffle" title="Shuffle">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="16 3 21 3 21 8"/>
+              <line x1="4" y1="20" x2="21" y2="3"/>
+              <polyline points="21 16 21 21 16 21"/>
+              <line x1="15" y1="15" x2="21" y2="21"/>
+              <line x1="4" y1="4" x2="9" y2="9"/>
+            </svg>
+          </button>
+          <button id="np-prev-btn" class="np-btn np-btn-sm" aria-label="Previous">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+              <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+            </svg>
+          </button>
+          <button id="np-play-btn" class="np-btn np-btn-play" aria-label="Play/Pause">
+            <svg id="np-play-icon" viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+            <svg id="np-pause-icon" viewBox="0 0 24 24" width="22" height="22" fill="currentColor" style="display:none">
+              <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+            </svg>
+          </button>
+          <button id="np-next-btn" class="np-btn np-btn-sm" aria-label="Next">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+              <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+            </svg>
+          </button>
+          <button id="np-repeat-btn" class="np-btn np-btn-sm" aria-label="Repeat" title="Repeat">
+            <svg id="np-repeat-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="17 1 21 5 17 9"/>
+              <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+              <polyline points="7 23 3 19 7 15"/>
+              <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+            </svg>
+            <span id="np-repeat-one" style="display:none;position:absolute;font-size:8px;font-weight:700;top:50%;left:50%;transform:translate(-50%,-50%)">1</span>
+          </button>
+        </div>
+        <div class="np-time-row">
+          <span id="np-current-time" class="np-time">0:00</span>
+          <div id="np-progress-click" class="np-progress-click">
+            <div id="np-progress-click-fill" class="np-progress-click-fill"></div>
+          </div>
+          <span id="np-duration" class="np-time">0:00</span>
+        </div>
+      </div>
+      <div class="np-right">
+        <button id="np-like-btn" class="np-btn np-btn-sm np-btn-like" aria-label="Like" title="Like">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+          </svg>
+        </button>
+        <button id="np-queue-btn" class="np-btn np-btn-sm" aria-label="Queue" title="Queue">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="8" y1="6" x2="21" y2="6"/>
+            <line x1="8" y1="12" x2="21" y2="12"/>
+            <line x1="8" y1="18" x2="21" y2="18"/>
+            <line x1="3" y1="6" x2="3.01" y2="6"/>
+            <line x1="3" y1="12" x2="3.01" y2="12"/>
+            <line x1="3" y1="18" x2="3.01" y2="18"/>
+          </svg>
+        </button>
+        <div class="np-volume-wrap">
+          <button id="np-volume-btn" class="np-btn np-btn-sm" aria-label="Volume" title="Volume">
+            <svg id="np-volume-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+              <path id="np-volume-waves" d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+            </svg>
+          </button>
+          <div id="np-volume-slider-wrap" class="np-volume-slider-wrap">
+            <input type="range" id="np-volume-slider" class="np-volume-slider" min="0" max="100" value="100" aria-label="Volume">
+          </div>
+        </div>
+        <button id="np-close-btn" class="np-btn np-btn-sm" aria-label="Expand" title="Full screen">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 3 21 3 21 9"/>
+            <polyline points="9 21 3 21 3 15"/>
+            <line x1="21" y1="3" x2="14" y2="10"/>
+            <line x1="3" y1="21" x2="10" y2="14"/>
+          </svg>
+        </button>
+      </div>
+    </footer>
+
+    <!-- ═══ Mobile Bottom Nav ═══ -->
+    <nav id="mobile-nav" class="mobile-nav">
+      <button class="mnav-item active" data-tab="home" aria-label="Home">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <span>Home</span>
+      </button>
+      <button class="mnav-item" data-tab="playlists" aria-label="Playlists">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        <span>Playlists</span>
+      </button>
+      <button class="mnav-item" data-tab="favorites" aria-label="Favorites">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+        <span>Favorites</span>
+      </button>
+      <button class="mnav-item" data-tab="folders" aria-label="Folders">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        <span>Folders</span>
+      </button>
+    </nav>
+
+    <!-- ═══ Full-screen Player ═══ -->
+    <section id="fullscreen-player" class="fs-player" aria-hidden="true">
+      <div class="fs-bg" id="fs-bg"></div>
+      <div class="fs-scrim"></div>
+      <div class="fs-inner">
+        <header class="fs-top">
+          <button id="fs-collapse" class="fs-icon-btn" aria-label="Minimize">
+            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="fs-top-label">
+            <span class="fs-top-sub">PLAYING FROM</span>
+            <span id="fs-source" class="fs-top-src">Library</span>
+          </div>
+          <button id="fs-more" class="fs-icon-btn" aria-label="More">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+          </button>
+        </header>
+
+        <div class="fs-stage">
+          <div class="fs-art-wrap">
+            <img id="fs-art" class="fs-art" alt="">
+            <div id="fs-art-ph" class="fs-art-ph" style="display:none">
+              <svg viewBox="0 0 24 24" width="80" height="80" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            </div>
+          </div>
+          <div id="fs-lyrics-panel" class="fs-lyrics">
+            <div id="fs-lyrics-content" class="fs-lyrics-content"></div>
+          </div>
+          <div id="fs-queue-panel" class="fs-queue">
+            <div class="fs-queue-head">Up Next</div>
+            <div id="fs-queue-list" class="fs-queue-list"></div>
+          </div>
+        </div>
+
+        <div class="fs-meta">
+          <div class="fs-meta-text">
+            <div id="fs-title" class="fs-title">—</div>
+            <div id="fs-artist" class="fs-artist"></div>
+          </div>
+          <button id="fs-like" class="fs-like" aria-label="Like">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          </button>
+        </div>
+
+        <div class="fs-progress-row">
+          <span id="fs-current" class="fs-time">0:00</span>
+          <div id="fs-progress" class="fs-progress"><div id="fs-progress-fill" class="fs-progress-fill"></div></div>
+          <span id="fs-duration" class="fs-time">0:00</span>
+        </div>
+
+        <div class="fs-controls">
+          <button id="fs-shuffle" class="fs-ctl" aria-label="Shuffle">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+          </button>
+          <button id="fs-prev" class="fs-ctl" aria-label="Previous">
+            <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+          </button>
+          <button id="fs-play" class="fs-ctl fs-play" aria-label="Play/Pause">
+            <svg id="fs-play-icon" viewBox="0 0 24 24" width="32" height="32" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            <svg id="fs-pause-icon" viewBox="0 0 24 24" width="32" height="32" fill="currentColor" style="display:none"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          </button>
+          <button id="fs-next" class="fs-ctl" aria-label="Next">
+            <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+          </button>
+          <button id="fs-repeat" class="fs-ctl" aria-label="Repeat">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+            <span id="fs-repeat-one" style="display:none">1</span>
+          </button>
+        </div>
+
+        <div class="fs-bottom">
+          <button id="fs-tab-lyrics" class="fs-tab" data-fs-tab="lyrics">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="14" y2="12"/><line x1="4" y1="17" x2="17" y2="17"/></svg>
+            <span>Lyrics</span>
+          </button>
+          <button id="fs-tab-queue" class="fs-tab" data-fs-tab="queue">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            <span>Up Next</span>
+          </button>
+          <button id="fs-sleep" class="fs-tab" aria-label="Sleep timer">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            <span>Sleep<span id="fs-sleep-badge" class="fs-sleep-badge"></span></span>
+          </button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ═══ Loading Overlay ═══ -->
+  <div id="loading-overlay" class="loading-overlay">
+    <div class="spinner"></div>
+    <span id="loading-text" class="loading-text">Loading...</span>
+  </div>
+
+  <!-- ═══ Hidden file input for uploads ═══ -->
+  <input type="file" id="file-input" multiple accept="audio/*" style="display:none">
+  <input type="file" id="cover-input" accept="image/*" style="display:none">
+
+  <script src="/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').then(function(reg) {
+        reg.addEventListener('updatefound', function() {
+          var newWorker = reg.installing;
+          newWorker.addEventListener('statechange', function() {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              window.location.reload();
+            }
+          });
+        });
+      }).catch(function(){});
+    }
+  </script>
+</body>
+</html>

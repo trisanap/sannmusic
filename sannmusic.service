@@ -1,0 +1,17 @@
+[Unit]
+Description=SannMusic file server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sann
+WorkingDirectory=/home/sann/sannmusic
+Environment=PORT=5678
+Environment=MUSIC_DIR=/home/sann/music
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
