@@ -8,7 +8,7 @@ A self-hosted, folder-based music streaming server wrapped in a decluttered, Spo
 </p>
 
 <p align="center">
-  <img src="screenshots/mobile.png" alt="Mobile — Home, Playlists, Favorites" width="45%">
+  <img src="screenshots/mobile.png" alt="Mobile — Home, Playlists, Favorites" width="70%">
   <br><em>Mobile: Home · Playlists · Favorites</em>
 </p>
 
@@ -16,7 +16,7 @@ A self-hosted, folder-based music streaming server wrapped in a decluttered, Spo
 
 SannMusic was created as an alternative to Navidrome and Gonic self-hosting music streaming servers. It offers folder-based music browsing with a decluttered Spotify-like UI for ease of use and familiarity, and is equipped with the [LRCLIB](https://lrclib.net/) API for lyrics.
 
-All music in the library is hosted by `[sannserver](music.trisandrean.web.id)` from decentralized sources. This project was developed as an alternative to mainstream music streaming to boycott Spotify, which is currently targeted by the BDS Movement over the CEO's military tech investments, partnerships with complicit companies, and low artist payouts.
+All music in the library is hosted by [sannserver](https://music.trisandrean.web.id) from decentralized sources. This project was developed as an alternative to mainstream music streaming to boycott Spotify, which is currently targeted by the BDS Movement over the CEO's military tech investments, partnerships with complicit companies, and low artist payouts.
 
 ## Features
 
@@ -105,3 +105,4 @@ sannmusic/
 ## Links
 
 - Repo: [github.com/trisanap/sannmusic](https://github.com/trisanap/sannmusic)
+- App: [sannmusic](https://music.trisandrean.web.id)
