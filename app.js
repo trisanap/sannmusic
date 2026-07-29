@@ -3380,8 +3380,8 @@ function loadPlaylists() {
           '<div id="settings-change-result" style="font-size:13px"></div>' +
         '</div>' +
         '<div id="settings-about" class="settings-panel">' +
-          '<p style="color:var(--text);font-size:13px;line-height:1.7;margin:0">SannMusic was created as an alternative to Navidrome and Gonic self-hosting music streaming server. Offering folder-based music browsing with decluttered Spotify-like UI for easy to use and familiarity, equipped with LRCLIB API for the lyrics feature. All music in the library is hosted by sannserver from decentralized sources. Developed as an alternative to music streaming to boycott Spotify as it is now being targeted by the BDS Movement, focusing on the CEO\'s military tech investments, partnerships with complicit companies, and low artist pay.</p>' +
-          '<p style="color:var(--text-dim);font-size:12px;margin:0">Trisan Andrean Putra &copy; 2026</p>' +
+          '<p style="color:var(--text);font-size:13px;line-height:1.7;margin:0">SannMusic was created as an alternative to Navidrome and Gonic self-hosting music streaming server. Offering folder-based music browsing with decluttered Spotify-like UI for easy to use and familiarity. Equipped with LRCLIB API for the lyrics feature. All music in the library is hosted by sannserver from decentralized sources. Developed as an alternative to music streaming to boycott Spotify as it is now being targeted by the BDS Movement, focusing on the CEO\'s military tech investments, partnerships with complicit companies, and low artist pay.</p>' +
+          '<p style="color:var(--text-dim);font-size:12px;margin:0">Trisan Andrean Putra &copy; 2026 &middot; <a href="https://github.com/trisanap/sannmusic" target="_blank" style="color:var(--accent);text-decoration:none">github.com/trisanap/sannmusic</a></p>' +
         '</div>' +
         usersPanelHtml +
       '</div>';
