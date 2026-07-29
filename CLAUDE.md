@@ -7,7 +7,7 @@ Music streaming PWA on port 5678, served at `https://music.trisandrean.web.id` (
 - **Backend:** Express.js (`server.js`) — REST API, auth, streaming, transcoding, LRCLIB proxy, search, favorites enrichment
 - **Frontend:** Vanilla JS SPA (`app.js`, `index.html`, `styles.css`) — Spotify-like UI with full-screen player, mobile bottom nav, collapsible sidebar, global topbar
 - **Design:** Claude Design v3 — Montserrat font, emerald identity (#1fd981), floating rounded panels, full-bleed gradient heroes
-- **Service worker:** `sw.js` cache v11 — bump `CACHE_NAME` on every frontend change
+- **Service worker:** `sw.js` — bump `CACHE_NAME` on every frontend change
 
 ## Running
 
@@ -47,8 +47,10 @@ Then SCP from bazzite to pull them.
 
 ### Current notable contents
 - Ария — full discography 1985-2025 in FLAC (20 albums, ~160 tracks, ~6.7GB)
-- Aimer, Radiohead, Tame Impala, wave to earth, Electric Light Orchestra, Keane, Carpenters, CCR, Carpenters, Tony Orlando and Dawn, Frankie Valli and The Four Seasons
-- ~1000+ tracks total, mix of FLAC and MP3
+- Любэ — 2002 - Давай за, 1996 - Комбат
+- 이희상, Bershy, Epitone Project, Sidney Gish, The Black Skirts, Dawid Podsiadło, мой друг магнитофон, Станислав Юрко, Денис Майданов
+- Aimer, Radiohead, Tame Impala, wave to earth, Electric Light Orchestra, Keane, Carpenters, CCR, Tony Orlando and Dawn, Frankie Valli and The Four Seasons
+- ~1100+ tracks total, mix of FLAC and MP3
 
 ## slskd (Soulseek) downloads
 
@@ -69,6 +71,15 @@ Then SCP from bazzite to pull them.
   mv "/home/sann/slskd-data/downloads/Disc 2/"* "/home/sann/music/Artist/YEAR - Album/"
   ```
 - **Critical:** After any `mkdir`/`mv`, check ownership: `ls -la /home/sann/music/` — if owned by `root`, run `sudo chown -R sann:sann "/home/sann/music/New Folder"`. Also applies to files in `/home/sann/sannmusic/` — if the node server can't write to `users.json`, `hidden.json`, playlists, or lyrics cache, run `sudo chown -R sann:sann /home/sann/sannmusic/`.
+
+### Non-slskd downloads
+- `/mnt/green/Music/` — secondary download location. Move to `/home/sann/music/` with `chown -R sann:sann` afterwards.
+- Loose MP3s (no album folder): create `Artist/Синглы/` and place there.
+
+### Manual lyrics caching
+- Server caches LRCLIB responses to `/home/sann/sannmusic/lyrics/<md5>.json`
+- Cache key: `MD5(artist_name|track_name|album_name|duration)` — duration is `parseInt` of seconds
+- To inject lyrics from a `.txt` file: compute the hash, write `{id, trackName, artistName, albumName, duration, plainLyrics, syncedLyrics: null, cached: true}`
 
 ## API Reference
 
@@ -157,7 +168,7 @@ All `/api/*` routes require authentication (Bearer token or `?token=` query para
 - **Metadata race condition:** `items[audioIndices[tasks.length - 1]]` always wrote to the last audio file — fixed by using `items[i]` directly (the `let i` closure correctly captures each index)
 - **Favorites durations missing:** Old likes stored without `duration`. Server now enriches GET /api/favorites with real file durations
 - **Watcher incremental downloads:** `mv` on folder then `[[ -e $dst ]] && continue` blocked remaining tracks. Watcher disabled; manual moves only
-- **users.json root-owned:** Direct shell edits left files owned by root → node couldn't write. Fixed with `chown -R sann:sann`
+- **Background playback stall (2026-07-29):** When screen was off, `play()` calls were silently rejected and `ended` event sometimes didn't fire in suspended tabs. Fixed with 5s keepalive timer (detects stalled/ended audio and recovers) + 3-retry backoff in `playFromQueue` when `play()` is rejected.
 
 ## Common gotchas
 - **Permission errors** — `mkdir`/`mv` via Bash tool runs as root; always follow with `sudo chown -R sann:sann` on new directories in `/home/sann/music/` and files in `/home/sann/sannmusic/`
@@ -168,3 +179,5 @@ All `/api/*` routes require authentication (Bearer token or `?token=` query para
 - **`app.use('/api', authRequired)`** at line 263 — all `/api/*` routes after this line require auth
 - **Non-admin users** restricted from upload, mkdir, rename, delete, hide/show, settings
 - **Claude Design iterations** — new design files from bazzite overwrite app.js; must re-apply custom integrations: `getStreamUrl` with format/bitrate params, `shouldTranscode()`, `api.search()`, `api.getLyrics()`, `loadLyrics()` with LRCLIB fallback, `fetchLyricsFromLrclib()`, `playFromQueue()` transcoding check
+- **View padding-top creates sidebar height mismatch** — `.playlists-view`, `.favorites-view`, and `#tab-folders` all had padding-top (8px or 16px) that pushed gradient heroes down, causing a visible height mismatch with the sidebar along their shared edge. All three now use `padding-top: 0`. If adding a new tab view with a hero, make sure padding-top is 0; if adding top breathing room to content without a hero, use margin on the first child element instead.
+- **Potential library migration to /mnt/green/music/** — music currently at `/home/sann/music/` (47GB on 228GB NVMe root, 79GB free). Target: `/mnt/green/music/` (2.7TB HDD, 1.6TB free, already serves Jellyfin). Steps: `rsync -av /home/sann/music/ /mnt/green/music/`, update `MUSIC_DIR` in `/etc/systemd/system/sannmusic.service`, `sudo systemctl daemon-reload && sudo systemctl restart sannmusic`. Do this during low-traffic hours since the service will be briefly interrupted. Green is ext4, user-writable by `sann` — no permission changes needed.

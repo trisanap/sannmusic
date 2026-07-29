@@ -100,6 +100,14 @@ class FileServerAPI {
     return this._request('/api/rename', 'POST', { oldPath: oldPath, newPath: newPath });
   }
 
+  getScanStatus() {
+    return this._request('/api/scan/status');
+  }
+
+  triggerScan() {
+    return this._request('/api/scan', 'POST');
+  }
+
   del(itemPath) {
     return this._request('/api/delete', 'POST', { path: itemPath });
   }
@@ -138,6 +146,10 @@ class FileServerAPI {
 
   deletePlaylist(id) {
     return this._request('/api/playlists/' + encodeURIComponent(id), 'DELETE');
+  }
+
+  sharePlaylist(id, sharedWith) {
+    return this._request('/api/playlists/' + encodeURIComponent(id) + '/share', 'POST', { sharedWith: sharedWith });
   }
 
   addTracksToPlaylist(id, tracks) {
@@ -184,7 +196,7 @@ class FileServerAPI {
       return r.json();
     }).then(function(data) {
       self._token = data.token;
-      sessionStorage.setItem('sannmusic_token', data.token);
+      localStorage.setItem('sannmusic_token', data.token);
       return data;
     });
   }
@@ -197,9 +209,9 @@ class FileServerAPI {
       headers: this._authHeader()
     }).then(function(r) { return r.json(); }).catch(function() {}).then(function() {
       self._token = null;
-      sessionStorage.removeItem('sannmusic_token');
-      sessionStorage.removeItem('sannmusic_username');
-      sessionStorage.removeItem('sannmusic_isAdmin');
+      localStorage.removeItem('sannmusic_token');
+      localStorage.removeItem('sannmusic_username');
+      localStorage.removeItem('sannmusic_isAdmin');
     });
   }
 
@@ -308,9 +320,9 @@ var app = (function() {
   };
 
   var authState = {
-    token: sessionStorage.getItem('sannmusic_token') || null,
-    username: sessionStorage.getItem('sannmusic_username') || null,
-    isAdmin: sessionStorage.getItem('sannmusic_isAdmin') === 'true'
+    token: localStorage.getItem('sannmusic_token') || sessionStorage.getItem('sannmusic_token') || null,
+    username: localStorage.getItem('sannmusic_username') || sessionStorage.getItem('sannmusic_username') || null,
+    isAdmin: (localStorage.getItem('sannmusic_isAdmin') || sessionStorage.getItem('sannmusic_isAdmin')) === 'true'
   };
 
   /* ─── DOM Cache ─── */
@@ -334,6 +346,10 @@ var app = (function() {
     breadcrumb:        $('breadcrumb'),
     selectToggle:      $('btn-select-toggle'),
     toolbarBtn:        $('btn-toolbar'),
+    rescanBtn:         $('btn-rescan'),
+    scanProgress:      $('scan-progress'),
+    scanProgressBar:   $('scan-progress-bar'),
+    scanProgressText:  $('scan-progress-text'),
     mainContent:       $('main-content'),
     tabHome:           $('tab-home'),
     tabPlaylists:      $('tab-playlists'),
@@ -383,6 +399,7 @@ var app = (function() {
 
   audio.addEventListener('ended', function() {
     state.isPlaying = false;
+    releaseWakeLock();
     if (state.repeat === 1) {
       audio.currentTime = 0;
       audio.play().catch(function() {});
@@ -399,18 +416,21 @@ var app = (function() {
 
   audio.addEventListener('pause', function() {
     state.isPlaying = false;
+    releaseWakeLock();
     renderNowPlaying();
     updatePlayButtons();
   });
 
   audio.addEventListener('play', function() {
     state.isPlaying = true;
+    requestWakeLock();
     renderNowPlaying();
     updatePlayButtons();
   });
 
   audio.addEventListener('error', function() {
     state.isPlaying = false;
+    releaseWakeLock();
     state.nowPlaying = null;
     renderNowPlaying();
     updatePlayButtons();
@@ -457,6 +477,18 @@ var app = (function() {
   function stripExt(name) {
     var dot = name.lastIndexOf('.');
     return dot > 0 ? name.substring(0, dot) : name;
+  }
+
+  function trackPayload(t) {
+    var md = t.metadata || {};
+    return {
+      path: t.path,
+      name: t.name,
+      artist: t.artist || md.artist || undefined,
+      album: t.album || md.album || undefined,
+      duration: t.duration || md.duration || undefined,
+      metadata: Object.keys(md).length > 0 ? md : undefined
+    };
   }
 
   function formatLongDuration(seconds) {
@@ -550,14 +582,15 @@ var app = (function() {
 
     api = new FileServerAPI(serverUrl);
     api.login(username, password).then(function(data) {
-      sessionStorage.setItem('sannmusic_server', serverUrl);
-      sessionStorage.setItem('sannmusic_username', data.username);
-      sessionStorage.setItem('sannmusic_isAdmin', data.isAdmin ? 'true' : 'false');
+      localStorage.setItem('sannmusic_server', serverUrl);
+      localStorage.setItem('sannmusic_username', data.username);
+      localStorage.setItem('sannmusic_isAdmin', data.isAdmin ? 'true' : 'false');
       authState.username = data.username;
       authState.isAdmin = data.isAdmin;
       dom.connectBtn.textContent = 'Connect';
       dom.connectBtn.disabled = false;
       dom.settingsBtn.style.display = '';
+      if (dom.rescanBtn) dom.rescanBtn.style.display = authState.isAdmin ? '' : 'none';
       showBrowser();
       loadHome();
       return loadRoot();
@@ -879,16 +912,15 @@ var app = (function() {
           if (albumLink) {
             e.stopPropagation();
             var p = albumLink.dataset.albumPath;
+            showLoading();
             switchTab('folders');
-            setTimeout(function() {
-              state.path = [{ path: '', name: 'Home' }];
-              var parts = p.split('/');
-              for (var pi = 0; pi < parts.length; pi++) {
-                state.path.push({ path: parts.slice(0, pi + 1).join('/'), name: parts[pi] });
-              }
-              renderBreadcrumb();
-              loadDirectory(p);
-            }, 100);
+            state.path = [{ path: '', name: 'Home' }];
+            var parts = p.split('/');
+            for (var pi = 0; pi < parts.length; pi++) {
+              state.path.push({ path: parts.slice(0, pi + 1).join('/'), name: parts[pi] });
+            }
+            renderBreadcrumb();
+            loadDirectory(p);
             return;
           }
           setQueueFromFavorites();
@@ -1118,7 +1150,7 @@ var app = (function() {
   /* ─── Header Back Button ─── */
 
   function updateHeaderChrome() {} // no-op: header bar removed
-  function showHeaderBack(onClick) { if (onClick) onClick(); }
+  function showHeaderBack(onClick) { /* ponytail: back nav via sidebar, no-op */ }
   function hideHeaderBack() {}
 
   /* ─── Selection System ─── */
@@ -1388,10 +1420,10 @@ var app = (function() {
         var albumDirs = dirs.filter(function(d) { return d.folderType === 'album'; });
 
         if (artistDirs.length > 0) {
-          html += '<div class="subhead">Artists</div>' + renderFolderCardGrid(artistDirs);
+          html += '<details class="section-group" open><summary class="subhead">Artists (' + artistDirs.length + ')</summary>' + renderFolderCardGrid(artistDirs) + '</details>';
         }
         if (albumDirs.length > 0) {
-          html += '<div class="subhead">Albums</div>' + renderFolderCardGrid(albumDirs);
+          html += '<details class="section-group" open><summary class="subhead">Albums & Compilations (' + albumDirs.length + ')</summary>' + renderFolderCardGrid(albumDirs) + '</details>';
         }
       } else {
         if (audioFiles.length > 0) html += '<div class="subhead">Folders</div>';
@@ -1572,6 +1604,49 @@ var app = (function() {
 
   /* ─── Toolbar ─── */
 
+  dom.rescanBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    var btn = e.currentTarget;
+    btn.disabled = true;
+
+    api.triggerScan().then(function() {
+      // Show progress bar, connect SSE
+      dom.scanProgress.style.display = '';
+      dom.scanProgressBar.style.width = '0%';
+      dom.scanProgressText.textContent = 'Enumerating...';
+
+      var evtSource = new EventSource(api.baseUrl + '/api/scan/progress?token=' + encodeURIComponent(api._token));
+      evtSource.onmessage = function(ev) {
+        var p = JSON.parse(ev.data);
+        if (p.phase === 'enumerate') {
+          dom.scanProgressText.textContent = 'Found ' + p.total + ' files...';
+        } else if (p.phase === 'scan') {
+          var pct = Math.round((p.done / p.total) * 100);
+          dom.scanProgressBar.style.width = pct + '%';
+          dom.scanProgressText.textContent = p.done + '/' + p.total + ' (' + p.indexed + ' new)';
+        } else if (p.phase === 'done') {
+          dom.scanProgressBar.style.width = '100%';
+          dom.scanProgressText.textContent = p.indexed + ' indexed, ' + p.total + ' total. Done.';
+          setTimeout(function() { dom.scanProgress.style.display = 'none'; }, 3000);
+          btn.disabled = false;
+          evtSource.close();
+        } else if (p.phase === 'error') {
+          dom.scanProgressText.textContent = 'Error: ' + p.error;
+          btn.disabled = false;
+          evtSource.close();
+        }
+      };
+      evtSource.onerror = function() {
+        btn.disabled = false;
+        evtSource.close();
+        setTimeout(function() { dom.scanProgress.style.display = 'none'; }, 3000);
+      };
+    }).catch(function(err) {
+      btn.disabled = false;
+      handleError('Scan failed', err);
+    });
+  });
+
   dom.toolbarBtn.addEventListener('click', function(e) {
     e.stopPropagation();
     closeItemMenu();
@@ -1722,12 +1797,12 @@ var app = (function() {
         if (!btn) return;
         closeItemMenu();
         if (btn.dataset.action === 'add-to') {
-          api.addTracksToPlaylist(btn.dataset.plid, [{ path: item.path, name: item.name }])
+          api.addTracksToPlaylist(btn.dataset.plid, [trackPayload(item)])
             .then(function() {
               if (state.activeTab === 'playlists') loadPlaylists();
             }).catch(function(err) { handleError('Cannot add to playlist', err); });
         } else if (btn.dataset.action === 'new-playlist') {
-          promptNewPlaylistAndAdd([{ path: item.path, name: item.name }]);
+          promptNewPlaylistAndAdd([trackPayload(item)]);
         }
       });
     }).catch(function(err) {
@@ -1750,7 +1825,7 @@ var app = (function() {
       if (pls.length === 0) {
         // No playlists — create one
         var folderName = dir ? dir.split('/').pop() : 'New playlist';
-        var tracksData = tracks.map(function(t) { return { path: t.path, name: t.name }; });
+        var tracksData = tracks.map(trackPayload);
         api.createPlaylist(folderName).then(function(newPl) {
           return api.addTracksToPlaylist(newPl.id, tracksData);
         }).then(function() {
@@ -1785,7 +1860,7 @@ var app = (function() {
     backdrop.addEventListener('click', function(e) {
       var btn = e.target.closest('[data-action]');
       if (!btn) return;
-      var tracksData = tracks.map(function(t) { return { path: t.path, name: t.name }; });
+      var tracksData = tracks.map(trackPayload);
       close();
       if (btn.dataset.action === 'pick') {
         showLoading('Adding...');
@@ -2050,12 +2125,25 @@ function loadPlaylists() {
 
     if (dom.header) dom.header.style.display = 'none';
     var count = pl.tracks ? pl.tracks.length : 0;
+    var totalDur = 0;
+    if (pl.tracks) {
+      for (var d = 0; d < pl.tracks.length; d++) {
+        var td = pl.tracks[d].duration || (pl.tracks[d].metadata && pl.tracks[d].metadata.duration);
+        if (td) totalDur += td;
+      }
+    }
+    var owner = pl.createdBy || 'Unknown';
+    var ownerInitial = owner.charAt(0).toUpperCase();
     var html = '<div class="album-detail-header playlist-hero">';
     html += '<div class="playlist-hero-cover">' + renderPlaylistCoverHTML(pl.coverDirs, pl) + '</div>';
     html += '<div class="album-detail-info">';
     html += '<div class="album-detail-label">Playlist</div>';
     html += '<h1 class="album-detail-title">' + escapeHtml(pl.name) + '</h1>';
-    html += '<div class="album-detail-meta">' + count + ' song' + (count !== 1 ? 's' : '') + '</div>';
+    html += '<div class="favorites-meta-row">';
+    html += '<span class="favorites-owner"><span class="favorites-owner-avatar">' + escapeHtml(ownerInitial) + '</span>' + escapeHtml(owner) + '</span>';
+    html += '<span>•</span><span>' + count + ' song' + (count !== 1 ? 's' : '') + '</span>';
+    if (totalDur > 0) html += '<span>•</span><span>' + favTotalDuration(totalDur) + '</span>';
+    html += '</div>';
     html += '</div></div>';
     html += '<div class="album-detail-actions">';
     html += '<button class="album-play-all-btn" id="playlist-play-all" aria-label="Play all" title="Play all">' + PI(28) + '</button>';
@@ -2065,7 +2153,7 @@ function loadPlaylists() {
     if (!pl.tracks || pl.tracks.length === 0) {
       html += '<div class="empty-state">No tracks</div>';
     } else {
-      html += '<div class="track-head"><span class="th-num">#</span><span class="th-title">Title</span><span class="th-dur">' + CLOCK_GLYPH + '</span><span class="th-more"></span></div>';
+      html += '<div class="track-head"><span class="th-num">#</span><span class="th-title">Title</span><span class="th-album">Album</span><span class="th-dur">' + CLOCK_GLYPH + '</span><span class="th-more"></span></div>';
       html += '<div class="items-list track-list">';
       for (var i = 0; i < pl.tracks.length; i++) {
         var track = pl.tracks[i];
@@ -2081,6 +2169,8 @@ function loadPlaylists() {
         html += '<div class="item-info"><div class="item-name">' + escapeHtml(tnm) + '</div>';
         if (tartist) html += '<div class="item-meta">' + escapeHtml(tartist) + '</div>';
         html += '</div>';
+        var albumPath = track.path.substring(0, track.path.lastIndexOf('/'));
+        html += '<span class="item-album album-link" data-album-path="' + escapeHtml(albumPath) + '">' + escapeHtml(track.album || albumPath.split('/').pop() || '') + '</span>';
         if (tdur) html += '<span class="item-duration">' + formatTime(tdur) + '</span>';
         html += '<button class="btn-more" data-action="more-track" aria-label="More">•••</button>';
         html += '</div>';
@@ -2122,6 +2212,21 @@ function loadPlaylists() {
             }
             return;
           }
+          var albumLink = e.target.closest('.album-link');
+          if (albumLink) {
+            e.stopPropagation();
+            var p = albumLink.dataset.albumPath;
+            showLoading();
+            switchTab('folders');
+            state.path = [{ path: '', name: 'Home' }];
+            var parts = p.split('/');
+            for (var pi = 0; pi < parts.length; pi++) {
+              state.path.push({ path: parts.slice(0, pi + 1).join('/'), name: parts[pi] });
+            }
+            renderBreadcrumb();
+            loadDirectory(p);
+            return;
+          }
           // Click row to play
           setQueueFromPlaylist(pl);
           playFromQueue(idx);
@@ -2134,9 +2239,12 @@ function loadPlaylists() {
     closeItemMenu();
     var menu = document.createElement('div');
     menu.className = 'dropdown';
+    var isShared = !!(pl.sharedWith && pl.sharedWith.length > 0);
+    var shareLabel = authState.isAdmin ? (isShared ? 'Unshare from everyone' : 'Share with everyone') : (isShared ? 'Unshare' : 'Share with admin');
     menu.innerHTML =
       '<button class="dropdown-item" data-action="edit-name">Edit name</button>' +
       '<button class="dropdown-item" data-action="change-cover-pl">Change cover</button>' +
+      '<button class="dropdown-item" data-action="share-pl">' + shareLabel + '</button>' +
       '<div class="dropdown-divider"></div>' +
       '<button class="dropdown-item dropdown-item-danger" data-action="delete-pl">Delete playlist</button>';
 
@@ -2186,6 +2294,20 @@ function loadPlaylists() {
             if (state.activeTab === 'playlists') loadPlaylists();
           }).catch(function(err) { hideLoading(); handleError('Cannot refresh', err); });
         });
+      } else if (btn.dataset.action === 'share-pl') {
+        var newShared = isShared ? [] : (authState.isAdmin ? ['*'] : ['admin']);
+        showLoading(isShared ? 'Unsharing...' : 'Sharing...');
+        api.sharePlaylist(pl.id, newShared).then(function(result) {
+          hideLoading();
+          pl.sharedWith = result.sharedWith;
+          for (var k = 0; k < state.playlists.length; k++) {
+            if (state.playlists[k].id === pl.id) {
+              state.playlists[k].sharedWith = result.sharedWith;
+              break;
+            }
+          }
+          renderPlaylistDetail();
+        }).catch(function(err) { hideLoading(); handleError('Cannot share', err); });
       } else if (btn.dataset.action === 'delete-pl') {
         if (!confirm('Delete playlist "' + pl.name + '"?')) return;
         showLoading('Deleting...');
@@ -2280,15 +2402,25 @@ function loadPlaylists() {
     var tc = shouldTranscode(item.path);
     var url = tc ? api.getStreamUrl(item.path, tc.format, tc.bitrate) : api.getStreamUrl(item.path);
     audio.src = url;
+    _playWithRetry(0);
+    return true;
+  }
+
+  function _playWithRetry(attempt) {
     audio.play().then(function() {
       state.isPlaying = true;
       renderNowPlaying();
       updatePlayButtons();
-      recordRecentPlay(item.path, item.name);
+      if (state.nowPlaying && state.queueIndex >= 0 && state.queueIndex < state.queue.length) {
+        recordRecentPlay(state.queue[state.queueIndex].path, state.queue[state.queueIndex].name);
+      }
     }).catch(function(err) {
-      handleError('Playback failed', err);
+      if (attempt < 3 && state.nowPlaying) {
+        setTimeout(function() { _playWithRetry(attempt + 1); }, 1000 * (attempt + 1));
+      } else {
+        handleError('Playback failed', err);
+      }
     });
-    return true;
   }
 
   function recordRecentPlay(path, name) {
@@ -2392,9 +2524,17 @@ function loadPlaylists() {
     }
 
     var artistParts = [];
-    if (tags.artist) artistParts.push(tags.artist);
-    if (tags.album) artistParts.push(tags.album);
-    dom.npArtist.textContent = artistParts.join(' · ') || '';
+    var trackPath = state.nowPlaying.path;
+    var albumPath = trackPath.substring(0, trackPath.lastIndexOf('/'));
+    var albumParts = albumPath.split('/');
+    // Artist = first segment, Album = full parent path
+    if (tags.artist) {
+      artistParts.push('<span class="np-link" data-nav-path="' + escapeHtml(albumParts[0]) + '">' + escapeHtml(tags.artist) + '</span>');
+    }
+    if (tags.album) {
+      artistParts.push('<span class="np-link" data-nav-path="' + escapeHtml(albumPath) + '">' + escapeHtml(tags.album) + '</span>');
+    }
+    dom.npArtist.innerHTML = artistParts.join(' <span style="opacity:0.4">·</span> ') || '';
 
     // Play/Pause icon
     if (state.isPlaying) {
@@ -2452,6 +2592,21 @@ function loadPlaylists() {
 
   dom.npPrevBtn.addEventListener('click', function() { playPrevInQueue(); });
   dom.npNextBtn.addEventListener('click', function() { playNextInQueue(true); });
+
+  dom.npArtist.addEventListener('click', function(e) {
+    var link = e.target.closest('.np-link');
+    if (!link) return;
+    var p = link.dataset.navPath;
+    showLoading();
+    switchTab('folders');
+    state.path = [{ path: '', name: 'Home' }];
+    var parts = p.split('/');
+    for (var pi = 0; pi < parts.length; pi++) {
+      state.path.push({ path: parts.slice(0, pi + 1).join('/'), name: parts[pi] });
+    }
+    renderBreadcrumb();
+    loadDirectory(p);
+  });
 
   dom.npShuffleBtn.addEventListener('click', function() {
     state.shuffle = !state.shuffle;
@@ -2664,6 +2819,56 @@ function loadPlaylists() {
       }
     });
   }
+
+  /* ─── Wake Lock (keep screen alive during playback) ─── */
+
+  var _wakeLock = null;
+
+  function requestWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    navigator.wakeLock.request('screen').then(function(sentinel) {
+      _wakeLock = sentinel;
+      _wakeLock.addEventListener('release', function() { _wakeLock = null; });
+    }).catch(function() {});
+  }
+
+  function releaseWakeLock() {
+    if (_wakeLock) {
+      _wakeLock.release().catch(function() {});
+      _wakeLock = null;
+    }
+  }
+
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible') {
+      if (state.isPlaying && !audio.paused) {
+        requestWakeLock();
+      }
+    }
+  });
+
+  // Keepalive: detect and recover from background playback stalls.
+  // When the screen is off, the browser may throttle the page, reject play()
+  // calls, or skip the 'ended' event. This polls every 5s and nudges playback.
+  setInterval(function() {
+    if (!state.nowPlaying) return;
+    if (!state.isPlaying && audio.paused) return; // user manually paused
+
+    if (audio.paused || audio.readyState === 0) {
+      // Audio stalled or never loaded — retry current track
+      audio.play().catch(function() {});
+    } else if (audio.ended || (audio.duration && audio.currentTime >= audio.duration - 0.5)) {
+      // Track finished but 'ended' event didn't fire while backgrounded
+      audio.dispatchEvent(new Event('ended'));
+    }
+  }, 5000);
+
+  // Retry playback when page becomes visible again
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible' && state.nowPlaying && state.isPlaying && audio.paused) {
+      audio.play().catch(function() {});
+    }
+  });
 
   /* ─── Keyboard Shortcuts ─── */
 
@@ -3139,7 +3344,7 @@ function loadPlaylists() {
     var usersTabHtml = authState.isAdmin ? '<button class="settings-tab" data-tab="users">Users</button>' : '';
     var usersPanelHtml = authState.isAdmin ? '' +
       '<div id="settings-users" class="settings-panel">' +
-        '<div id="settings-users-list" style="margin-bottom:12px"></div>' +
+        '<div id="settings-users-list"></div>' +
         '<div style="border-top:1px solid var(--border);padding-top:12px">' +
           '<div class="modal-title" style="font-size:16px;margin-bottom:8px">Add User</div>' +
           '<label class="field"><span class="field-label">Username</span><input type="text" id="settings-new-username" class="modal-input" placeholder="Username"></label>' +
@@ -3155,25 +3360,30 @@ function loadPlaylists() {
 
     backdrop.innerHTML =
       '<div class="modal-box" style="max-width:500px;max-height:80vh;overflow-y:auto">' +
-        '<div class="modal-title">Settings</div>' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">' +
+          '<div class="modal-title" style="margin:0">Settings</div>' +
+          '<button id="settings-close" style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;padding:4px 8px;line-height:1" aria-label="Close">&times;</button>' +
+        '</div>' +
         '<div id="settings-tabs" style="display:flex;gap:8px;border-bottom:1px solid var(--border);padding-bottom:8px">' +
           '<button class="settings-tab active" data-tab="account">Account</button>' +
+          '<button class="settings-tab" data-tab="about">About</button>' +
           usersTabHtml +
         '</div>' +
         '<div id="settings-account" class="settings-panel active">' +
-          '<p style="color:var(--text-dim);font-size:13px;margin-bottom:12px">Logged in as <strong style="color:var(--text)">' + escapeHtml(authState.username) + '</strong></p>' +
+          '<p style="color:var(--text-dim);font-size:13px;margin:0">Logged in as <strong style="color:var(--text)">' + escapeHtml(authState.username) + '</strong></p>' +
           '<label class="field"><span class="field-label">Current Password</span><input type="password" id="settings-curr-pw" class="modal-input" placeholder="Current password"></label>' +
           '<label class="field"><span class="field-label">New Password</span><input type="password" id="settings-new-pw" class="modal-input" placeholder="New password"></label>' +
           '<div class="modal-actions">' +
+            '<button class="modal-btn modal-btn-danger" id="settings-logout">Log Out</button>' +
             '<button class="modal-btn modal-btn-primary" id="settings-change-pw">Change Password</button>' +
           '</div>' +
-          '<div id="settings-change-result" style="font-size:13px;margin-top:4px"></div>' +
-          '<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)"><button class="modal-btn modal-btn-danger" id="settings-logout">Log Out</button></div>' +
+          '<div id="settings-change-result" style="font-size:13px"></div>' +
+        '</div>' +
+        '<div id="settings-about" class="settings-panel">' +
+          '<p style="color:var(--text);font-size:13px;line-height:1.7;margin:0">SannMusic was created as an alternative to Navidrome and Gonic self-hosting music streaming server. Offering folder-based music browsing with decluttered Spotify-like UI for easy to use and familiarity, equipped with LRCLIB API for the lyrics feature. All music in the library is hosted by sannserver from decentralized sources. Developed as an alternative to music streaming to boycott Spotify as it is now being targeted by the BDS Movement, focusing on the CEO\'s military tech investments, partnerships with complicit companies, and low artist pay.</p>' +
+          '<p style="color:var(--text-dim);font-size:12px;margin:0">Trisan Andrean Putra &copy; 2026</p>' +
         '</div>' +
         usersPanelHtml +
-        '<div class="modal-actions" style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">' +
-          '<button class="modal-btn modal-btn-secondary" id="settings-close">Close</button>' +
-        '</div>' +
       '</div>';
     document.body.appendChild(backdrop);
 
@@ -3221,20 +3431,23 @@ function loadPlaylists() {
     var logoutBtn = backdrop.querySelector('#settings-logout');
     if (logoutBtn) {
       logoutBtn.addEventListener('click', function() {
+        if (!confirm('Are you sure you want to log out?')) return;
         close();
         api.logout().then(function() {
           api = null;
           authState.token = null;
           authState.username = null;
           authState.isAdmin = false;
-          sessionStorage.removeItem('sannmusic_token');
-          sessionStorage.removeItem('sannmusic_username');
-          sessionStorage.removeItem('sannmusic_isAdmin');
+          localStorage.removeItem('sannmusic_token');
+          localStorage.removeItem('sannmusic_username');
+          localStorage.removeItem('sannmusic_isAdmin');
           dom.settingsBtn.style.display = 'none';
           showLogin();
         }).catch(function() {
           api = null;
-          sessionStorage.clear();
+          localStorage.removeItem('sannmusic_token');
+          localStorage.removeItem('sannmusic_username');
+          localStorage.removeItem('sannmusic_isAdmin');
           dom.settingsBtn.style.display = 'none';
           showLogin();
         });
@@ -3379,8 +3592,8 @@ function loadPlaylists() {
     });
 
     // Check for stored session
-    var storedServer = sessionStorage.getItem('sannmusic_server') || localStorage.getItem('sannmusic_server');
-    var storedToken = sessionStorage.getItem('sannmusic_token');
+    var storedServer = localStorage.getItem('sannmusic_server') || sessionStorage.getItem('sannmusic_server');
+    var storedToken = localStorage.getItem('sannmusic_token') || sessionStorage.getItem('sannmusic_token');
 
     if (storedServer && storedToken) {
       api = new FileServerAPI(storedServer);
@@ -3389,8 +3602,8 @@ function loadPlaylists() {
       api.getMe().then(function(data) {
         authState.username = data.username;
         authState.isAdmin = data.isAdmin;
-        sessionStorage.setItem('sannmusic_username', data.username);
-        sessionStorage.setItem('sannmusic_isAdmin', data.isAdmin ? 'true' : 'false');
+        localStorage.setItem('sannmusic_username', data.username);
+        localStorage.setItem('sannmusic_isAdmin', data.isAdmin ? 'true' : 'false');
         dom.settingsBtn.style.display = '';
         hideLoading();
         showBrowser();
@@ -3399,9 +3612,9 @@ function loadPlaylists() {
       }).catch(function() {
         hideLoading();
         api = null;
-        sessionStorage.removeItem('sannmusic_token');
-        sessionStorage.removeItem('sannmusic_username');
-        sessionStorage.removeItem('sannmusic_isAdmin');
+        localStorage.removeItem('sannmusic_token');
+        localStorage.removeItem('sannmusic_username');
+        localStorage.removeItem('sannmusic_isAdmin');
         showLogin();
       });
     } else if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
@@ -3430,9 +3643,9 @@ function loadPlaylists() {
       authState.token = null;
       authState.username = null;
       authState.isAdmin = false;
-      sessionStorage.removeItem('sannmusic_token');
-      sessionStorage.removeItem('sannmusic_username');
-      sessionStorage.removeItem('sannmusic_isAdmin');
+      localStorage.removeItem('sannmusic_token');
+      localStorage.removeItem('sannmusic_username');
+      localStorage.removeItem('sannmusic_isAdmin');
       dom.settingsBtn.style.display = 'none';
       showLogin();
     });

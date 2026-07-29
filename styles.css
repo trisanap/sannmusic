@@ -10,7 +10,7 @@
   /* Surfaces */
   --bg:            #000;
   --panel:         #121212;   /* sidebar + main panel */
-  --panel-top:     #1c1c1c;   /* gradient top edge of main panel */
+  --panel-top:     #050505;   /* gradient top edge of main panel — near-black to blend with topbar */
   --elevated:      #181818;   /* cards */
   --elevated-2:    #282828;   /* card hover, menus */
   --surface-hover: hsla(0, 0%, 100%, 0.1);
@@ -224,10 +224,11 @@ body {
 .app-layout {
   display: flex;
   flex-direction: row;
-  height: 100%;
+  flex: 1;
+  min-height: 0; /* ponytail: prevents flex overflow — fills remaining space below topbar */
   position: relative;
   gap: var(--gap);
-  padding: var(--gap);
+  padding: 0 var(--gap) var(--gap);
   padding-bottom: calc(var(--np-h) + var(--gap));
 }
 
@@ -237,7 +238,7 @@ body {
   min-width: var(--sidebar-w);
   background: var(--panel);
   border: none;
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-panel) 0 0 var(--radius-panel);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -361,8 +362,31 @@ body {
   flex-direction: column;
   overflow: hidden;
   background: linear-gradient(180deg, var(--panel-top) 0%, var(--panel) 240px);
-  border-radius: var(--radius-panel);
+  border-radius: 0 var(--radius-panel) var(--radius-panel) 0;
   position: relative;
+}
+
+/* ─── Scan progress bar ─── */
+.scan-progress {
+  height: 3px;
+  background: var(--elevated-2);
+  flex-shrink: 0;
+  position: relative;
+}
+.scan-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  width: 0%;
+  transition: width 0.3s ease;
+  border-radius: 0 2px 2px 0;
+}
+.scan-progress-text {
+  position: absolute;
+  right: 8px;
+  top: -18px;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
 }
 
 /* ─── Header — translucent, sticky on the panel ─── */
@@ -449,7 +473,7 @@ body {
   -webkit-overflow-scrolling: touch;
   padding-bottom: 88px;
 }
-#tab-folders { padding-top: 16px; }
+#tab-folders { padding-top: 0; }
 .tab-content.active { display: block; }
 
 /* ═══ Generic list + empties ═══ */
@@ -714,7 +738,28 @@ body {
   color: var(--text);
   margin: 12px 0 14px;
   padding: 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
 }
+.subhead::-webkit-details-marker { display: none; }
+.subhead::after {
+  content: '';
+  display: inline-block;
+  width: 12px; height: 12px;
+  border-right: 2px solid var(--text-dim);
+  border-bottom: 2px solid var(--text-dim);
+  transform: rotate(-45deg) translateY(-2px);
+  transition: transform 0.2s;
+  opacity: 0.6;
+}
+details[open] > .subhead::after {
+  transform: rotate(45deg) translateY(0px);
+}
+.section-group { margin: 0; padding: 0; border: none; }
 .folder-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
@@ -885,6 +930,15 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.np-link {
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+}
+.np-link:hover {
+  color: var(--text);
+  text-decoration: underline;
 }
 
 /* center — controls + progress */
@@ -1128,7 +1182,8 @@ body {
 /* ═══════════════════════════════════════════════════════════════
    Section titles (Playlists / Favorites headers)
    ═══════════════════════════════════════════════════════════════ */
-.playlists-view, .favorites-view { padding: 8px 24px 24px; }
+.playlists-view, .favorites-view { padding: 0 24px 24px; }
+.home-view { padding: 8px 24px 24px; }
 
 .playlists-header, .favorites-header {
   display: flex;
@@ -1344,7 +1399,7 @@ body {
   margin: 0 -24px;
   background:
     linear-gradient(180deg, rgba(31, 217, 129, 0.32) 0%, rgba(31, 217, 129, 0.06) 50%, transparent 100%),
-    linear-gradient(180deg, #1a1a1a 0%, var(--panel) 100%);
+    linear-gradient(180deg, #000 0%, #1a1a1a 8px, var(--panel) 100%);
 }
 
 /* Full-bleed for folder hero (items-list has different padding) */
@@ -1357,7 +1412,7 @@ body {
 .album-detail-header.favorites-hero {
   background:
     linear-gradient(180deg, rgba(102,72,176,0.92) 0%, rgba(72,50,128,0.5) 50%, transparent 100%),
-    linear-gradient(180deg, #4d3a8c 0%, var(--panel) 100%);
+    linear-gradient(180deg, #000 0%, #4d3a8c 8px, var(--panel) 100%);
 }
 
 /* Breadcrumb inside hero (overlaid on gradient) */
@@ -1849,8 +1904,13 @@ body {
   .np-right { min-width: 0; width: auto; flex-shrink: 0; }
 
   .tab-content { padding-bottom: 128px; }
-  .playlists-view, .favorites-view, .home-view { padding: 8px 16px 20px; }
-  .playlist-grid, .album-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .playlists-view, .favorites-view { padding: 0 16px 20px; }
+  .home-view { padding: 8px 16px 20px; }
+  .playlist-grid, .album-grid, .folder-card-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 155px)); gap: 10px; justify-content: center; }
+  .folder-card, .playlist-card, .album-card { padding: 10px; }
+  .album-card-title, .playlist-card-name { font-size: 13px; }
+  .album-card-artist, .playlist-card-meta { font-size: 11px; }
+  .folder-card-grid { padding: 0 12px 12px; }
   .artist-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
 
   .album-detail-header, .artist-detail-header {
@@ -1967,8 +2027,9 @@ body {
 }
 .settings-tab:hover { background: rgba(255,255,255,0.08); color: var(--text); }
 .settings-tab.active { background: var(--accent); color: #000; }
-.settings-panel { display: none; padding-top: 12px; }
-.settings-panel.active { display: block; }
+.settings-panel { display: none; }
+.settings-panel.active { display: flex; flex-direction: column; gap: 20px; padding-top: 20px; }
+.settings-panel .modal-actions { margin-top: 0; }
 
 /* ═══════════════════════════════════════════════════════════════
    v2 ENHANCEMENTS — logo, full-screen player, mobile nav, polish

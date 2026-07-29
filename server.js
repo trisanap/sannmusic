@@ -7,6 +7,7 @@ const path = require('path');
 const crypto = require('crypto');
 const mm = require('music-metadata');
 const NodeID3 = require('node-id3');
+const db = require('./db');
 
 const PORT = process.env.PORT || 8080;
 const ROOT_DIR = path.resolve(process.env.MUSIC_DIR || process.env.ROOT_DIR || path.join(__dirname, 'music'));
@@ -20,6 +21,10 @@ const app = express();
 app.use(express.json());
 
 /* ─── Static files (PWA shell) ─── */
+app.get('/sw.js', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.sendFile(path.join(__dirname, 'sw.js'));
+});
 app.use(express.static(__dirname));
 
 /* ─── Auth Configuration ─── */
@@ -581,7 +586,7 @@ const coverUpload = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB
 });
 
-app.post('/api/cover', authRequired, adminRequired, coverUpload.single('cover'), (req, res) => {
+app.post('/api/cover', authRequired, coverUpload.single('cover'), (req, res) => {
   const file = req.file;
   if (!file) return res.status(400).json({ error: 'No image file provided' });
   if (req.query.playlist) {
@@ -590,8 +595,12 @@ app.post('/api/cover', authRequired, adminRequired, coverUpload.single('cover'),
       try { fs.unlinkSync(file.path); } catch (_) {}
       return res.status(404).json({ error: 'Playlist not found' });
     }
-    // Update playlist's cover timestamp to bust cache
+    // Allow owner or admin to upload playlist cover
     const data = JSON.parse(fs.readFileSync(plPath, 'utf8'));
+    if (!req.user.isAdmin && data.createdBy !== req.user.username) {
+      try { fs.unlinkSync(file.path); } catch (_) {}
+      return res.status(403).json({ error: 'Access denied' });
+    }
     data.hasCustomCover = true;
     data.coverVersion = Date.now();
     fs.writeFileSync(plPath, JSON.stringify(data, null, 2), 'utf8');
@@ -880,11 +889,82 @@ app.get('/api/lyrics', async (req, res) => {
 
 /* ─── GET /api/search?q=... ─── */
 
+/* ─── Scan endpoints ─── */
+
+app.get('/api/scan/status', authRequired, (req, res) => {
+  res.json({
+    scanning: db.isScanning(),
+    trackCount: db.getTrackCount()
+  });
+});
+
+app.post('/api/scan', authRequired, adminRequired, (req, res) => {
+  if (db.isScanning()) return res.status(409).json({ error: 'Scan already in progress' });
+  res.json({ ok: true });
+  // Run scan in background
+  db.scanLibrary({
+    progress: (p) => db.scanEvents.emit('progress', p)
+  }).catch((e) => {
+    db.scanEvents.emit('error', e.message);
+  });
+});
+
+app.get('/api/scan/progress', authRequired, (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
+
+  const onProgress = (p) => {
+    res.write('data: ' + JSON.stringify(p) + '\n\n');
+    if (p.phase === 'done') {
+      res.end();
+      db.scanEvents.off('progress', onProgress);
+      db.scanEvents.off('error', onError);
+    }
+  };
+  const onError = (msg) => {
+    res.write('data: ' + JSON.stringify({ phase: 'error', error: msg }) + '\n\n');
+    res.end();
+    db.scanEvents.off('progress', onProgress);
+    db.scanEvents.off('error', onError);
+  };
+
+  db.scanEvents.on('progress', onProgress);
+  db.scanEvents.on('error', onError);
+
+  req.on('close', () => {
+    db.scanEvents.off('progress', onProgress);
+    db.scanEvents.off('error', onError);
+  });
+});
+
+/* ─── Search ─── */
+
 app.get('/api/search', (req, res) => {
   try {
-    const q = (req.query.q || '').trim().toLowerCase();
+    const q = (req.query.q || '').trim();
     if (!q || q.length < 2) return res.json({ results: [] });
 
+    const count = db.getTrackCount();
+    if (count > 0 && req.query.source !== 'fs') {
+      // Use SQLite index
+      const rows = db.searchTracks(q, 50);
+      const results = rows.map(r => ({
+        name: r.path.split('/').pop(),
+        path: r.path,
+        type: 'track',
+        album: r.album || undefined,
+        artist: r.artist || undefined,
+        title: r.title || undefined,
+        duration: r.duration || undefined
+      }));
+      return res.json({ results });
+    }
+
+    // Filesystem fallback
+    const qLower = q.toLowerCase();
     const results = [];
     const maxResults = 50;
 
@@ -901,7 +981,7 @@ app.get('/api/search', (req, res) => {
         const nameLower = name.toLowerCase();
         const rel = relPath ? relPath + '/' + name : name;
 
-        if (nameLower.includes(q)) {
+        if (nameLower.includes(qLower)) {
           if (entry.isDirectory()) {
             results.push({ name, path: rel, type: 'folder' });
           } else if (isAudioFile(name)) {
@@ -910,7 +990,6 @@ app.get('/api/search', (req, res) => {
         }
 
         if (entry.isDirectory()) {
-          // Don't recurse into hidden dirs from hidden.json
           const hiddenPaths = loadHidden();
           if (hiddenPaths.includes(rel)) continue;
           walk(path.join(dirPath, name), rel);
@@ -957,6 +1036,12 @@ function checkPlaylistAccess(req, playlist) {
   if (playlist.createdBy === req.user.username) return true;
   // Legacy playlists without createdBy: grant access
   if (!playlist.createdBy) return true;
+  // Check sharedWith: ['*'] means all users, ['admin'] means any admin, or specific username match
+  if (playlist.sharedWith && playlist.sharedWith.length > 0) {
+    if (playlist.sharedWith.includes('*')) return true;
+    if (playlist.sharedWith.includes('admin') && req.user.isAdmin) return true;
+    if (playlist.sharedWith.includes(req.user.username)) return true;
+  }
   return false;
 }
 
@@ -968,8 +1053,11 @@ app.get('/api/playlists', authRequired, (req, res) => {
       .filter(f => f.isFile() && f.name.endsWith('.json'))
       .map(f => {
         const data = JSON.parse(fs.readFileSync(path.join(PLAYLISTS_DIR, f.name), 'utf8'));
-        // Filter: admins see all, users see own + legacy (no owner)
-        if (!req.user.isAdmin && data.createdBy && data.createdBy !== req.user.username) return null;
+        // Filter: admins see all, users see own + legacy + shared
+        if (!req.user.isAdmin && data.createdBy && data.createdBy !== req.user.username) {
+          const sw = data.sharedWith || [];
+          if (!sw.includes('*') && !(sw.includes('admin') && req.user.isAdmin) && !sw.includes(req.user.username)) return null;
+        }
         let coverDirs = data.coverDirs;
         if (!coverDirs && data.tracks && data.tracks.length > 0) {
           coverDirs = computeCoverDirs(data.tracks);
@@ -985,7 +1073,8 @@ app.get('/api/playlists', authRequired, (req, res) => {
           coverDirs: coverDirs || [],
           hasCustomCover: !!data.hasCustomCover,
           coverVersion: data.coverVersion || 0,
-          createdBy: data.createdBy || null
+          createdBy: data.createdBy || null,
+          sharedWith: data.sharedWith || null
         };
       })
       .filter(Boolean)
@@ -1019,8 +1108,27 @@ app.post('/api/playlists', authRequired, (req, res) => {
   }
 });
 
+// Helper: enrich a track with metadata from the audio file (async)
+async function enrichTrack(track) {
+  if (track.metadata && track.metadata.title && track.metadata.duration) return track;
+  try {
+    const filePath = safePath(track.path);
+    if (!filePath || !fs.existsSync(filePath)) return track;
+    const meta = await mm.parseFile(filePath, { duration: true, skipCovers: true });
+    track.metadata = track.metadata || {};
+    if (!track.metadata.title && meta.common.title) track.metadata.title = meta.common.title;
+    if (!track.metadata.artist && meta.common.artist) track.metadata.artist = meta.common.artist;
+    if (!track.metadata.album && meta.common.album) track.metadata.album = meta.common.album;
+    if (!track.metadata.duration && meta.format.duration) track.metadata.duration = Math.round(meta.format.duration);
+    if (!track.artist && meta.common.artist) track.artist = meta.common.artist;
+    if (!track.album && meta.common.album) track.album = meta.common.album;
+    if (!track.duration && meta.format.duration) track.duration = Math.round(meta.format.duration);
+  } catch (_) { /* file unreadable, skip */ }
+  return track;
+}
+
 // GET /api/playlists/:id — get one
-app.get('/api/playlists/:id', authRequired, (req, res) => {
+app.get('/api/playlists/:id', authRequired, async (req, res) => {
   try {
     const playlist = readPlaylistFile(req.params.id);
     if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
@@ -1029,6 +1137,10 @@ app.get('/api/playlists/:id', authRequired, (req, res) => {
     if (!playlist.coverDirs) {
       playlist.coverDirs = computeCoverDirs(playlist.tracks || []);
       writePlaylistFile(req.params.id, playlist);
+    }
+    // Enrich tracks with metadata
+    if (playlist.tracks && playlist.tracks.length > 0) {
+      playlist.tracks = await Promise.all(playlist.tracks.map(enrichTrack));
     }
     res.json(playlist);
   } catch (e) {
@@ -1055,6 +1167,33 @@ app.put('/api/playlists/:id', authRequired, (req, res) => {
     playlist.updatedAt = Date.now();
     writePlaylistFile(req.params.id, playlist);
     res.json(playlist);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/playlists/:id/share — toggle sharing
+app.post('/api/playlists/:id/share', authRequired, (req, res) => {
+  try {
+    const playlist = readPlaylistFile(req.params.id);
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!checkPlaylistAccess(req, playlist)) return res.status(403).json({ error: 'Access denied' });
+
+    const sharedWith = req.body.sharedWith || [];
+    if (!Array.isArray(sharedWith)) return res.status(400).json({ error: 'sharedWith must be an array' });
+
+    // Non-admin users can only share with admin
+    if (!req.user.isAdmin) {
+      const cleaned = sharedWith.filter(u => u === 'admin' || u === 'sann');
+      playlist.sharedWith = cleaned.length > 0 ? cleaned : [];
+    } else {
+      // Admin can share with all ('*') or clear
+      playlist.sharedWith = sharedWith.includes('*') ? ['*'] : sharedWith;
+    }
+
+    playlist.updatedAt = Date.now();
+    writePlaylistFile(req.params.id, playlist);
+    res.json({ sharedWith: playlist.sharedWith });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

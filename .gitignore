@@ -4,4 +4,7 @@ favorites/
 playlists/
 lyrics/
 music/
+music.db
+music.db-shm
+music.db-wal
 *.docx
