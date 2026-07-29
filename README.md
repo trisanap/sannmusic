@@ -2,6 +2,16 @@
 
 A self-hosted, folder-based music streaming server wrapped in a decluttered, Spotify-like UI — built as a lightweight alternative to Navidrome and Gonic.
 
+<p align="center">
+  <img src="screenshots/desktop.png" alt="Desktop — Folder view" width="70%">
+  <br><em>Desktop: Folder view with collapsible Artists/Albums</em>
+</p>
+
+<p align="center">
+  <img src="screenshots/mobile.png" alt="Mobile — Home, Playlists, Favorites" width="45%">
+  <br><em>Mobile: Home · Playlists · Favorites</em>
+</p>
+
 ## About
 
 SannMusic was created as an alternative to Navidrome and Gonic self-hosting music streaming servers. It offers folder-based music browsing with a decluttered Spotify-like UI for ease of use and familiarity, and is equipped with the [LRCLIB](https://lrclib.net/) API for lyrics.
