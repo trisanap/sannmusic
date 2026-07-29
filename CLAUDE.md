@@ -50,6 +50,7 @@ Then SCP from bazzite to pull them.
 - Любэ — 2002 - Давай за, 1996 - Комбат
 - 이희상, Bershy, Epitone Project, Sidney Gish, The Black Skirts, Dawid Podsiadło, мой друг магнитофон, Станислав Юрко, Денис Майданов
 - Aimer, Radiohead, Tame Impala, wave to earth, Electric Light Orchestra, Keane, Carpenters, CCR, Tony Orlando and Dawn, Frankie Valli and The Four Seasons
+- Cyberpunk 2077 radio compilations: 89.3 RADIO VEXELSTROM, 89.7 Growl FM, 98.7 Body Heat Radio (2020)
 - ~1100+ tracks total, mix of FLAC and MP3
 
 ## slskd (Soulseek) downloads
@@ -156,7 +157,8 @@ All `/api/*` routes require authentication (Bearer token or `?token=` query para
 - `app.js` — Frontend (FileServerAPI class, player state machine, UI rendering)
 - `index.html` — Structure (login screen, topbar, sidebar, main panel, full-screen player, mobile nav, mini-player)
 - `styles.css` — Complete Spotify-like theme (2,200+ lines)
-- `sw.js` — Service worker (bump CACHE_NAME on every frontend deploy)
+- `sw.js` — Service worker (bump CACHE_NAME on every frontend deploy; server serves with `no-cache` to prevent stale SW)
+- `README.md` — Project README with screenshots
 - `users.json` — Auth credentials
 - `hidden.json` — Hidden folder paths
 - `favorites/<user>.json` — Per-user favorites
@@ -169,6 +171,7 @@ All `/api/*` routes require authentication (Bearer token or `?token=` query para
 - **Favorites durations missing:** Old likes stored without `duration`. Server now enriches GET /api/favorites with real file durations
 - **Watcher incremental downloads:** `mv` on folder then `[[ -e $dst ]] && continue` blocked remaining tracks. Watcher disabled; manual moves only
 - **Background playback stall (2026-07-29):** When screen was off, `play()` calls were silently rejected and `ended` event sometimes didn't fire in suspended tabs. Fixed with 5s keepalive timer (detects stalled/ended audio and recovers) + 3-retry backoff in `playFromQueue` when `play()` is rejected.
+- **Stale SW on mobile (2026-07-30):** Chrome cached old SW and wouldn't pick up UI updates without incognito. Fixed with `Cache-Control: no-cache, no-store` on `/sw.js`, `updateViaCache: 'none'` in registration, and `controllerchange` listener for reliable updates.
 
 ## Common gotchas
 - **Permission errors** — `mkdir`/`mv` via Bash tool runs as root; always follow with `sudo chown -R sann:sann` on new directories in `/home/sann/music/` and files in `/home/sann/sannmusic/`
