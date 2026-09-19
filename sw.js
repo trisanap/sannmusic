@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'sannmusic-v36';
+const CACHE_NAME = 'sannmusic-v48';
 const SHELL_URLS = [
   '/',
   '/index.html',

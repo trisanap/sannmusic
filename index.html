@@ -16,35 +16,89 @@
 
   <!-- ═══ Login Screen ═══ -->
   <div id="login-screen" class="screen">
-    <div class="login-card">
-      <div class="login-logo">
-        <svg viewBox="0 0 48 48" width="76" height="76" aria-hidden="true">
-          <defs><linearGradient id="lgLogin" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2BE995"/><stop offset="1" stop-color="#10B86B"/></linearGradient></defs>
-          <rect x="2" y="2" width="44" height="44" rx="13" fill="url(#lgLogin)"/>
-          <g fill="#06140E"><rect x="11" y="18" width="4.2" height="12" rx="2.1"/><rect x="17.4" y="13" width="4.2" height="22" rx="2.1"/><rect x="23.8" y="9" width="4.2" height="30" rx="2.1"/><rect x="30.2" y="16" width="4.2" height="16" rx="2.1"/><rect x="36.6" y="20" width="4.2" height="8" rx="2.1"/></g>
-        </svg>
-      </div>
-      <h1 class="login-title">SannMusic</h1>
-      <p class="login-subtitle">File Server</p>
+    <div class="login-shell">
 
-      <div class="login-fields">
-        <label class="field">
-          <span class="field-label">Server URL</span>
-          <input type="url" id="server-url" class="input" placeholder="http://sannserver:8080" autocomplete="url" inputmode="url" spellcheck="false">
-        </label>
-        <label class="field">
-          <span class="field-label">Username</span>
-          <input type="text" id="username" class="input" placeholder="Username" autocomplete="username" spellcheck="false">
-        </label>
-        <label class="field">
-          <span class="field-label">Password</span>
-          <input type="password" id="password" class="input" placeholder="Password" autocomplete="current-password">
-        </label>
-      </div>
+      <!-- Brand -->
+      <section class="login-brand">
+        <div class="login-brand-head">
+          <svg class="login-mark" viewBox="0 0 48 48" width="54" height="54" aria-hidden="true">
+            <defs><linearGradient id="lgLogin" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2BE995"/><stop offset="1" stop-color="#10B86B"/></linearGradient></defs>
+            <rect x="2" y="2" width="44" height="44" rx="13" fill="url(#lgLogin)"/>
+            <g fill="#06140E"><rect x="11" y="18" width="4.2" height="12" rx="2.1"/><rect x="17.4" y="13" width="4.2" height="22" rx="2.1"/><rect x="23.8" y="9" width="4.2" height="30" rx="2.1"/><rect x="30.2" y="16" width="4.2" height="16" rx="2.1"/><rect x="36.6" y="20" width="4.2" height="8" rx="2.1"/></g>
+          </svg>
+          <div>
+            <div class="login-wordmark"><b>Sann</b><span class="logo-accent">Music</span></div>
+            <p class="login-tagline">Your library, everywhere</p>
+          </div>
+        </div>
+        <div class="login-eq" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+      </section>
 
-      <div id="login-error" class="login-error" role="alert"></div>
+      <!-- Sign-in card -->
+      <section class="login-card">
+        <div class="login-card-head">
+          <h1 class="login-title">Sign in</h1>
+          <p class="login-subtitle">Connect to your server</p>
+        </div>
 
-      <button id="connect-btn" class="btn-primary">Connect</button>
+        <div class="login-fields">
+          <label class="field">
+            <span class="field-label">Server URL</span>
+            <input type="url" id="server-url" class="input" placeholder="https://music.3san.fyi/" autocomplete="url" inputmode="url" spellcheck="false">
+          </label>
+          <label class="field">
+            <span class="field-label">Username</span>
+            <input type="text" id="username" class="input" placeholder="Username" autocomplete="username" spellcheck="false">
+          </label>
+          <label class="field">
+            <span class="field-label">Password</span>
+            <input type="password" id="password" class="input" placeholder="Password" autocomplete="current-password">
+          </label>
+        </div>
+
+        <div id="login-error" class="login-error" role="alert"></div>
+
+        <button id="connect-btn" class="btn-primary">Connect</button>
+        <p class="login-hint">Self-hosted — on the home network, use your server's IP.</p>
+      </section>
+
+      <!-- App info + download -->
+      <section class="login-info">
+        <ul class="login-features">
+          <li>
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg>
+            <span>Your own FLAC &amp; MP3 library, streamed from home</span>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <span>Auto-compresses FLAC when you're on mobile data</span>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="17" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="17" y1="18" x2="3" y2="18"/></svg>
+            <span>Synced lyrics, straight from LRCLIB</span>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            <span>Playlists, favorites &amp; history across devices</span>
+          </li>
+        </ul>
+
+        <a class="apk-card" href="/SannMusic-v5.3.apk" download="SannMusic-v5.3.apk">
+          <span class="apk-ico">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </span>
+          <span class="apk-body">
+            <span class="apk-title">Get the Android app</span>
+            <span class="apk-meta">v5.3 · 11 MB — Albums &amp; Artists tabs, save albums for offline listening</span>
+          </span>
+          <span class="apk-arrow">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+          </span>
+        </a>
+      </section>
+
     </div>
   </div>
 
@@ -128,11 +182,21 @@
             <span class="nav-label">Favorites</span>
           </button>
 
-          <button class="nav-item" data-tab="folders" title="Folders">
+          <button class="nav-item" data-tab="albums" title="Albums">
             <svg class="nav-icon" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              <rect x="3" y="3" width="18" height="18" rx="2.5"/>
+              <circle cx="12" cy="12" r="3.5"/>
             </svg>
-            <span class="nav-label">Folders</span>
+            <span class="nav-label">Albums</span>
+          </button>
+
+          <button class="nav-item" data-tab="artists" title="Artists">
+            <svg class="nav-icon" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="22"/>
+            </svg>
+            <span class="nav-label">Artists</span>
           </button>
         </div>
       </nav>
@@ -281,9 +345,13 @@
         <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
         <span>Favorites</span>
       </button>
-      <button class="mnav-item" data-tab="folders" aria-label="Folders">
-        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-        <span>Folders</span>
+      <button class="mnav-item" data-tab="albums" aria-label="Albums">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2.5"/><circle cx="12" cy="12" r="3.5"/></svg>
+        <span>Albums</span>
+      </button>
+      <button class="mnav-item" data-tab="artists" aria-label="Artists">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+        <span>Artists</span>
       </button>
     </nav>
 

@@ -569,7 +569,11 @@ const coverUpload = multer({
     filename: (req, file, cb) => {
       const ext = path.extname(file.originalname).toLowerCase();
       if (req.query.playlist) {
-        cb(null, req.query.playlist + '.cover' + ext);
+        // Sanitize before building the filename — multer writes here before the
+        // ownership check below runs, so an unsanitized id is a traversal write
+        const id = String(req.query.playlist).replace(/[^a-zA-Z0-9_-]/g, '');
+        if (!id) return cb(new Error('Invalid playlist id'));
+        cb(null, id + '.cover' + ext);
       } else {
         cb(null, 'cover' + ext);
       }
@@ -1045,6 +1049,15 @@ function checkPlaylistAccess(req, playlist) {
   return false;
 }
 
+// Mutations require ownership, not just view access. Legacy playlists without
+// createdBy are admin-only so an unknown owner can't be impersonated.
+const NOT_OWNER_MSG = 'Only the playlist owner or an admin can change this playlist';
+
+function checkPlaylistOwnership(req, playlist) {
+  if (req.user.isAdmin) return true;
+  return !!playlist.createdBy && playlist.createdBy === req.user.username;
+}
+
 // GET /api/playlists — list all
 app.get('/api/playlists', authRequired, (req, res) => {
   try {
@@ -1153,7 +1166,7 @@ app.put('/api/playlists/:id', authRequired, (req, res) => {
   try {
     const playlist = readPlaylistFile(req.params.id);
     if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
-    if (!checkPlaylistAccess(req, playlist)) return res.status(403).json({ error: 'Access denied' });
+    if (!checkPlaylistOwnership(req, playlist)) return res.status(403).json({ error: NOT_OWNER_MSG });
 
     if (req.body.name !== undefined) {
       const name = (req.body.name || '').trim();
@@ -1177,7 +1190,7 @@ app.post('/api/playlists/:id/share', authRequired, (req, res) => {
   try {
     const playlist = readPlaylistFile(req.params.id);
     if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
-    if (!checkPlaylistAccess(req, playlist)) return res.status(403).json({ error: 'Access denied' });
+    if (!checkPlaylistOwnership(req, playlist)) return res.status(403).json({ error: NOT_OWNER_MSG });
 
     const sharedWith = req.body.sharedWith || [];
     if (!Array.isArray(sharedWith)) return res.status(400).json({ error: 'sharedWith must be an array' });
@@ -1204,7 +1217,7 @@ app.delete('/api/playlists/:id', authRequired, (req, res) => {
   try {
     const playlist = readPlaylistFile(req.params.id);
     if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
-    if (!checkPlaylistAccess(req, playlist)) return res.status(403).json({ error: 'Access denied' });
+    if (!checkPlaylistOwnership(req, playlist)) return res.status(403).json({ error: NOT_OWNER_MSG });
     const fp = safePlaylistPath(req.params.id + '.json');
     fs.unlinkSync(fp);
     res.json({ ok: true });
@@ -1218,7 +1231,7 @@ app.post('/api/playlists/:id/tracks', authRequired, (req, res) => {
   try {
     const playlist = readPlaylistFile(req.params.id);
     if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
-    if (!checkPlaylistAccess(req, playlist)) return res.status(403).json({ error: 'Access denied' });
+    if (!checkPlaylistOwnership(req, playlist)) return res.status(403).json({ error: NOT_OWNER_MSG });
 
     const newTracks = req.body.tracks || [];
     const existingPaths = new Set(playlist.tracks.map(t => t.path));
@@ -1242,7 +1255,7 @@ app.delete('/api/playlists/:id/tracks', authRequired, (req, res) => {
   try {
     const playlist = readPlaylistFile(req.params.id);
     if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
-    if (!checkPlaylistAccess(req, playlist)) return res.status(403).json({ error: 'Access denied' });
+    if (!checkPlaylistOwnership(req, playlist)) return res.status(403).json({ error: NOT_OWNER_MSG });
 
     const indices = req.body.indices || [];
     if (!Array.isArray(indices)) return res.status(400).json({ error: 'indices must be an array' });
@@ -1333,6 +1346,122 @@ app.delete('/api/favorites', authRequired, (req, res) => {
   existing = existing.filter(t => t.path !== targetPath);
   saveFavorites(req.user.username, existing);
   res.json({ tracks: existing });
+});
+
+/* ─── Recently played endpoints ─── */
+
+const RECENT_DIR = path.join(__dirname, 'recent');
+try { fs.mkdirSync(RECENT_DIR, { recursive: true }); } catch (e) {}
+
+const RECENT_LIMIT = 20;
+
+function getRecentPath(username) {
+  const safe = username.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return path.join(RECENT_DIR, safe + '.json');
+}
+
+function loadRecent(username) {
+  try {
+    const fp = getRecentPath(username);
+    if (!fs.existsSync(fp)) return [];
+    const data = JSON.parse(fs.readFileSync(fp, 'utf8'));
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.error('Failed to load recent plays for ' + username + ':', e.message);
+    return [];
+  }
+}
+
+function saveRecent(username, tracks) {
+  fs.writeFileSync(getRecentPath(username), JSON.stringify(tracks, null, 2), 'utf8');
+}
+
+app.get('/api/recent', authRequired, (req, res) => {
+  res.json({ tracks: loadRecent(req.user.username) });
+});
+
+// POST accepts an array applied oldest → newest, so the last entry ends up on top
+app.post('/api/recent', authRequired, (req, res) => {
+  const tracks = req.body.tracks;
+  if (!Array.isArray(tracks)) return res.status(400).json({ error: 'tracks must be an array' });
+  const recent = loadRecent(req.user.username);
+  for (const t of tracks) {
+    if (!t || typeof t.path !== 'string' || !t.path) continue;
+    const entry = { path: t.path, name: t.name || t.path.split('/').pop(), timestamp: Date.now() };
+    if (t.title) entry.title = t.title;
+    if (t.artist) entry.artist = t.artist;
+    const idx = recent.findIndex(r => r.path === entry.path);
+    if (idx >= 0) recent.splice(idx, 1);
+    recent.unshift(entry);
+  }
+  const trimmed = recent.slice(0, RECENT_LIMIT);
+  saveRecent(req.user.username, trimmed);
+  res.json({ tracks: trimmed });
+});
+
+app.delete('/api/recent', authRequired, (req, res) => {
+  const targetPath = req.body.path;
+  if (!targetPath) return res.status(400).json({ error: 'path is required' });
+  const recent = loadRecent(req.user.username).filter(t => t.path !== targetPath);
+  saveRecent(req.user.username, recent);
+  res.json({ tracks: recent });
+});
+
+/* ─── Client diagnostics ─── */
+// Temporary: captures what the browser is actually doing while the screen is
+// off (media events, page-lifecycle freeze/resume, play() rejections).
+
+const DEBUG_DIR = path.join(__dirname, 'debug');
+try { fs.mkdirSync(DEBUG_DIR, { recursive: true }); } catch (e) {}
+
+const DEBUG_LIMIT = 2000;
+
+function getDebugPath(username) {
+  const safe = String(username).replace(/[^a-zA-Z0-9_-]/g, '_');
+  return path.join(DEBUG_DIR, safe + '.log');
+}
+
+app.post('/api/debug/log', authRequired, (req, res) => {
+  const events = req.body && req.body.events;
+  if (!Array.isArray(events)) return res.status(400).json({ error: 'events must be an array' });
+  const fp = getDebugPath(req.user.username);
+  const lines = events.slice(0, 200).map(e => JSON.stringify({
+    t: Date.now(),
+    c: typeof e.c === 'number' ? Math.round(e.c) : null,
+    e: String(e.e || '').slice(0, 40),
+    d: e.d === undefined ? null : e.d,
+    ua: e.e === 'boot' ? String(req.headers['user-agent'] || '').slice(0, 120) : undefined,
+  }));
+  try {
+    let existing = [];
+    if (fs.existsSync(fp)) {
+      existing = fs.readFileSync(fp, 'utf8').split('\n').filter(Boolean);
+    }
+    const merged = existing.concat(lines).slice(-DEBUG_LIMIT);
+    fs.writeFileSync(fp, merged.join('\n') + '\n', 'utf8');
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/debug/log', authRequired, (req, res) => {
+  if (!req.user.isAdmin && req.query.user && req.query.user !== req.user.username) {
+    return res.status(403).json({ error: 'Admins only' });
+  }
+  const target = req.query.user || req.user.username;
+  const fp = getDebugPath(target);
+  if (!fs.existsSync(fp)) return res.json({ lines: [] });
+  res.json({ lines: fs.readFileSync(fp, 'utf8').split('\n').filter(Boolean) });
+});
+
+app.delete('/api/debug/log', authRequired, (req, res) => {
+  const target = req.query.user || req.user.username;
+  if (!req.user.isAdmin && target !== req.user.username) {
+    return res.status(403).json({ error: 'Admins only' });
+  }
+  try { fs.unlinkSync(getDebugPath(target)); } catch (e) {}
+  res.json({ ok: true });
 });
 
 /* ─── Start ─── */

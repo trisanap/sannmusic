@@ -3,8 +3,11 @@ users.json
 favorites/
 playlists/
 lyrics/
+recent/
+debug/
 music/
 music.db
 music.db-shm
 music.db-wal
 *.docx
+*.apk

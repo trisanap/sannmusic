@@ -267,6 +267,20 @@ class FileServerAPI {
     return this._request('/api/favorites', 'DELETE', { path: path });
   }
 
+  // --- Recently played ---
+
+  getRecent() {
+    return this._request('/api/recent');
+  }
+
+  addRecent(tracks) {
+    return this._request('/api/recent', 'POST', { tracks: tracks });
+  }
+
+  removeRecent(path) {
+    return this._request('/api/recent', 'DELETE', { path: path });
+  }
+
   // --- Search ---
 
   search(q) {
@@ -305,6 +319,12 @@ var app = (function() {
     items:          [],
     nowPlaying:     null,
     isPlaying:      false,
+    // True whenever playback *should* be running. Only explicit user pause
+    // clears it, so background recovery can tell a stall from a real pause.
+    playIntent:     false,
+    // Guards against double-advancing when 'ended', the near-end check and the
+    // background keepalive all notice the same finish.
+    endHandled:     false,
     repeat:         0,
     shuffle:        false,
     activeTab:      'home',
@@ -324,6 +344,58 @@ var app = (function() {
     username: localStorage.getItem('sannmusic_username') || sessionStorage.getItem('sannmusic_username') || null,
     isAdmin: (localStorage.getItem('sannmusic_isAdmin') || sessionStorage.getItem('sannmusic_isAdmin')) === 'true'
   };
+
+  /* ─── Diagnostics (temporary) ───
+     Ships what the browser is really doing while the screen is off: media
+     events, page-lifecycle freeze/resume, play() rejections, keepalive ticks.
+     Read back with GET /api/debug/log. */
+
+  var CLIENT_BUILD = 'v41-diag';
+  var _dbgLastTu = 0;
+
+  function dbg(e, d) {
+    if (!api) return;
+    var body;
+    try {
+      body = JSON.stringify({ events: [{ c: audio.currentTime, e: e, d: d === undefined ? null : d }] });
+    } catch (err) { return; }
+    try {
+      fetch(api.baseUrl + '/api/debug/log', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, api._authHeader()),
+        body: body,
+        keepalive: true
+      }).catch(function() {});
+    } catch (err) {}
+  }
+
+  function dbgSnapshot() {
+    return {
+      rs: audio.readyState, ct: Math.round(audio.currentTime * 10) / 10,
+      dur: audio.duration && isFinite(audio.duration) ? Math.round(audio.duration) : null,
+      p: audio.paused, en: audio.ended, err: audio.error ? audio.error.code : null,
+      ip: state.isPlaying, pi: state.playIntent, eh: state.endHandled,
+      qi: state.queueIndex, ql: state.queue.length
+    };
+  }
+
+  ['play', 'pause', 'playing', 'waiting', 'stalled', 'suspend', 'abort', 'emptied'].forEach(function(t) {
+    audio.addEventListener(t, function() { dbg('a:' + t, dbgSnapshot()); });
+  });
+  ['loadedmetadata', 'canplay', 'canplaythrough', 'ended'].forEach(function(t) {
+    audio.addEventListener(t, function() { dbg('a:' + t, dbgSnapshot()); });
+  });
+  audio.addEventListener('error', function() {
+    dbg('a:error', { code: audio.error && audio.error.code, msg: audio.error && audio.error.message, snap: dbgSnapshot() });
+  });
+
+  ['freeze', 'resume', 'pagehide', 'pageshow'].forEach(function(t) {
+    document.addEventListener(t, function() { dbg('p:' + t, { hidden: document.hidden }); });
+  });
+  document.addEventListener('visibilitychange', function() {
+    dbg('p:vis', { hidden: document.hidden, state: document.visibilityState });
+  });
+  window.addEventListener('beforeunload', function() { dbg('p:unload', null); });
 
   /* ─── DOM Cache ─── */
 
@@ -371,7 +443,6 @@ var app = (function() {
     npNextBtn:         $('np-next-btn'),
     npShuffleBtn:      $('np-shuffle-btn'),
     npRepeatBtn:       $('np-repeat-btn'),
-    npRepeatIcon:      $('np-repeat-icon'),
     npRepeatOne:       $('np-repeat-one'),
     npCloseBtn:        $('np-close-btn'),
     npLikeBtn:         $('np-like-btn'),
@@ -400,19 +471,37 @@ var app = (function() {
   audio.addEventListener('ended', function() {
     state.isPlaying = false;
     releaseWakeLock();
+    handleTrackEnd();
+  });
+
+  // True once the element is at (or within half a second of) its end. Streams
+  // without a duration report Infinity/NaN, so those rely on 'ended' alone.
+  function trackNearEnd() {
+    return !!(audio.duration && isFinite(audio.duration) && audio.duration > 0 &&
+              audio.currentTime >= audio.duration - 0.5);
+  }
+
+  // Single entry point for "this track is done". Ignored unless the media
+  // really finished, so a stale 'ended' landing right after the near-end check
+  // already advanced the queue can't skip a track.
+  function handleTrackEnd() {
+    if (!state.nowPlaying || state.endHandled) { dbg('end:skip', { np: !!state.nowPlaying, eh: state.endHandled }); return; }
+    if (!audio.ended && !trackNearEnd()) { dbg('end:notfinished', dbgSnapshot()); return; }
+    state.endHandled = true;
+    dbg('end:run', dbgSnapshot());
+
     if (state.repeat === 1) {
+      state.endHandled = false;
       audio.currentTime = 0;
       audio.play().catch(function() {});
-    } else if (state.repeat === 2) {
-      playNextInQueue(true);
-    } else {
-      if (!playNextInQueue(false)) {
-        state.nowPlaying = null;
-        renderNowPlaying();
-      }
+    } else if (!playNextInQueue(state.repeat === 2)) {
+      // repeat-all wraps around; otherwise the queue is over
+      state.nowPlaying = null;
+      state.playIntent = false;
     }
+    renderNowPlaying();
     updatePlayButtons();
-  });
+  }
 
   audio.addEventListener('pause', function() {
     state.isPlaying = false;
@@ -447,6 +536,21 @@ var app = (function() {
       var pct = (audio.currentTime / audio.duration) * 100;
       dom.npProgressClickFill.style.width = pct + '%';
       dom.npCurrentTime.textContent = formatTime(audio.currentTime);
+
+      // Advance just before the end while the screen is off: JS still runs at
+      // this point (the tab is audible), whereas after 'ended' it may be
+      // throttled or frozen. Foreground playback keeps the last fraction of a
+      // second and waits for the real 'ended' event.
+      // Proves whether timeupdate still fires while the screen is off — the
+      // early advance below depends on it.
+      if (document.hidden) {
+        var tu = Math.floor(audio.currentTime);
+        if (tu >= _dbgLastTu + 10) { _dbgLastTu = tu; dbg('a:tu-hidden', { ct: tu }); }
+      }
+
+      if (document.hidden && !audio.paused && state.playIntent && audio.currentTime >= audio.duration - 0.4) {
+        handleTrackEnd();
+      }
     }
   });
 
@@ -546,6 +650,8 @@ var app = (function() {
 
   /* ─── Login ─── */
 
+  var DEFAULT_SERVER_URL = 'https://music.3san.fyi/';
+
   function showLogin() {
     dom.loginScreen.classList.add('visible');
     dom.browserScreen.classList.remove('visible');
@@ -553,9 +659,7 @@ var app = (function() {
     state.isPlaying = false;
     renderNowPlaying();
     var savedUrl = localStorage.getItem('sannmusic_server') || sessionStorage.getItem('sannmusic_server');
-    if (savedUrl) {
-      dom.serverUrl.value = savedUrl;
-    }
+    dom.serverUrl.value = savedUrl || DEFAULT_SERVER_URL;
   }
 
   function showLoginError(msg) {
@@ -592,6 +696,7 @@ var app = (function() {
       dom.settingsBtn.style.display = '';
       if (dom.rescanBtn) dom.rescanBtn.style.display = authState.isAdmin ? '' : 'none';
       showBrowser();
+      maybeShowNotice();
       loadHome();
       return loadRoot();
     }).catch(function(err) {
@@ -602,9 +707,67 @@ var app = (function() {
     });
   }
 
+  /* ─── Post-login notice ─── */
+
+  var NOTICE_DISMISS_KEY = 'sannmusic_notice_v2_dismissed';
+
+  function maybeShowNotice() {
+    if (localStorage.getItem(NOTICE_DISMISS_KEY) === 'true') return;
+    setTimeout(showNoticeModal, 600);
+  }
+
+  function showNoticeModal() {
+    var backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.innerHTML =
+      '<div class="modal-box notice-box">' +
+        '<div class="notice-head">' +
+          '<span class="notice-pill">New</span>' +
+          '<div class="modal-title">What&rsquo;s changed</div>' +
+        '</div>' +
+        '<div class="notice-item">' +
+          '<span class="notice-ico"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></span>' +
+          '<span class="notice-body">' +
+            '<strong>Android app</strong>' +
+            '<p>Now with Albums &amp; Artists tabs, offline listening, and an About dialog. Save an album and play it without a connection &mdash; it still keeps playing with the screen off.</p>' +
+            '<a class="notice-dl" href="/SannMusic-v5.3.apk" download="SannMusic-v5.3.apk">Download v5.3 (11 MB)' +
+              '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>' +
+            '</a>' +
+          '</span>' +
+        '</div>' +
+        '<div class="notice-item">' +
+          '<span class="notice-ico"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 18h.01"/><path d="M10 18h.01"/><path d="M12 14V4"/><path d="m8 8 4-4 4 4"/></svg></span>' +
+          '<span class="notice-body">' +
+            '<strong>Library moved</strong>' +
+            '<p>The music library now lives on the 1&nbsp;TB drive. Everything streams the same &mdash; streams may take a moment longer to start after the drive has been idle.</p>' +
+          '</span>' +
+        '</div>' +
+        '<label class="notice-remember"><input type="checkbox" id="notice-remember"> Don&rsquo;t remind me again</label>' +
+        '<div class="modal-actions">' +
+          '<button class="modal-btn modal-btn-primary" id="notice-ok">Got it</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+
+    var remember = backdrop.querySelector('#notice-remember');
+    var ok = backdrop.querySelector('#notice-ok');
+    function close() {
+      if (remember.checked) localStorage.setItem(NOTICE_DISMISS_KEY, 'true');
+      backdrop.remove();
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) { if (e.key === 'Escape') close(); }
+
+    ok.addEventListener('click', close);
+    backdrop.addEventListener('click', function(e) { if (e.target === backdrop) close(); });
+    document.addEventListener('keydown', onKey);
+    setTimeout(function() { ok.focus(); }, 100);
+  }
+
   /* ─── Browser ─── */
 
   function showBrowser() {
+    dbg('boot', { build: CLIENT_BUILD, ua: navigator.userAgent, hidden: document.hidden });
     dom.loginScreen.classList.remove('visible');
     dom.browserScreen.classList.add('visible');
     renderNowPlaying(); // set up initial mini-player state
@@ -672,6 +835,11 @@ var app = (function() {
 
   /* ─── Tab System ─── */
 
+  // Tabs that render into the single folders view, scoped to a library subfolder.
+  // '' is the unscoped folders tab, still used by search results and card clicks.
+  var FOLDER_TABS = { folders: '', albums: 'Albums', artists: 'Artists' };
+  function isFolderTab(tabId) { return Object.prototype.hasOwnProperty.call(FOLDER_TABS, tabId); }
+
   function switchTab(tabId) {
     hideHeaderBack();
     state.activeTab = tabId;
@@ -689,17 +857,17 @@ var app = (function() {
     if (dom.topbarHome) dom.topbarHome.classList.toggle('active', tabId === 'home');
     closeSearch();
     var _hb = document.getElementById('header-brand');
-    if (_hb) _hb.style.display = (tabId === 'folders') ? 'none' : '';
+    if (_hb) _hb.style.display = isFolderTab(tabId) ? 'none' : '';
 
     // Update tab visibility
     document.querySelectorAll('.tab-content').forEach(function(el) {
-      el.classList.toggle('active', el.id === 'tab-' + tabId);
+      el.classList.toggle('active', el.id === 'tab-' + (isFolderTab(tabId) ? 'folders' : tabId));
     });
 
     // Header visibility: breadcrumb, select, toolbar only on Folders (and admin only for select/toolbar)
     var isAdmin = authState.isAdmin;
     if (dom.breadcrumb) dom.breadcrumb.style.display = 'none';
-    dom.toolbarBtn.style.display = (tabId === 'folders' && isAdmin) ? '' : 'none';
+    dom.toolbarBtn.style.display = (isFolderTab(tabId) && isAdmin) ? '' : 'none';
     updateHeaderChrome();
 
     if (tabId === 'playlists') {
@@ -715,6 +883,18 @@ var app = (function() {
         loadDirectory('');
       } else if (state.items.length === 0) {
         loadDirectory(currentDir());
+      } else {
+        renderItems();
+      }
+    } else if (tabId === 'albums' || tabId === 'artists') {
+      // Scoped folders view: sidebar Albums/Artists land directly in that library folder
+      var scope = FOLDER_TABS[tabId];
+      if (state.path.length !== 2 || state.path[1].path !== scope) {
+        state.path = [{ path: '', name: 'Home' }, { path: scope, name: scope }];
+        renderBreadcrumb();
+        loadDirectory(scope);
+      } else if (state.items.length === 0) {
+        loadDirectory(scope);
       } else {
         renderItems();
       }
@@ -736,9 +916,22 @@ var app = (function() {
   }
 
   function loadRecentPlays() {
-    try {
-      state.recentPlays = JSON.parse(localStorage.getItem('sannmusic_recent') || '[]');
-    } catch(e) { state.recentPlays = []; }
+    api.getRecent().then(function(data) {
+      var server = data.tracks || [];
+      var local = [];
+      try { local = JSON.parse(localStorage.getItem('sannmusic_recent') || '[]'); } catch(e) {}
+      // One-time migration of plays recorded before recents lived on the server
+      if (server.length === 0 && local.length > 0 && !localStorage.getItem('sannmusic_recent_migrated')) {
+        localStorage.setItem('sannmusic_recent_migrated', '1');
+        api.addRecent(local.slice().reverse()).then(function(migrated) {
+          state.recentPlays = migrated.tracks || [];
+          renderHome();
+        }).catch(function() {});
+        return;
+      }
+      state.recentPlays = server;
+      renderHome();
+    }).catch(function() {});
   }
 
   function loadFavorites() {
@@ -1063,7 +1256,7 @@ var app = (function() {
 
   function playRecentTrack(path) {
     if (state.nowPlaying && state.nowPlaying.path === path) {
-      if (state.isPlaying) { audio.pause(); } else { audio.play().catch(function(){}); }
+      if (state.isPlaying) { state.playIntent = false; audio.pause(); } else { state.playIntent = true; audio.play().catch(function(){}); }
       return;
     }
     var slashIdx = path.lastIndexOf('/');
@@ -1082,12 +1275,8 @@ var app = (function() {
   }
 
   function removeRecentPlay(path) {
-    try {
-      var recent = JSON.parse(localStorage.getItem('sannmusic_recent') || '[]');
-      recent = recent.filter(function(r) { return r.path !== path; });
-      localStorage.setItem('sannmusic_recent', JSON.stringify(recent));
-      state.recentPlays = recent;
-    } catch(e) {}
+    state.recentPlays = state.recentPlays.filter(function(r) { return r.path !== path; });
+    api.removeRecent(path).catch(function() {});
   }
 
   function loadAndPlayPlaylist(plid) {
@@ -1414,21 +1603,13 @@ var app = (function() {
 
     // ── Sub-folders as cards ──
     if (dirs.length > 0) {
-      if (atRoot) {
-        // Curated root: artists on top, albums at bottom
-        var artistDirs = dirs.filter(function(d) { return d.folderType === 'artist' || d.folderType === 'mixed'; });
-        var albumDirs = dirs.filter(function(d) { return d.folderType === 'album'; });
-
-        if (artistDirs.length > 0) {
-          html += '<details class="section-group" open><summary class="subhead">Artists (' + artistDirs.length + ')</summary>' + renderFolderCardGrid(artistDirs) + '</details>';
-        }
-        if (albumDirs.length > 0) {
-          html += '<details class="section-group" open><summary class="subhead">Albums & Compilations (' + albumDirs.length + ')</summary>' + renderFolderCardGrid(albumDirs) + '</details>';
-        }
-      } else {
-        if (audioFiles.length > 0) html += '<div class="subhead">Folders</div>';
-        html += renderFolderCardGrid(dirs);
+      if (!atRoot && audioFiles.length > 0) {
+        html += '<div class="subhead">Folders</div>';
+      } else if (!atRoot && state.path.length === 2 && LIBRARY_BUCKETS.indexOf(state.path[1].path) !== -1) {
+        // Scoped Albums/Artists view: title the grid with the bucket name
+        html += '<div class="subhead">' + escapeHtml(state.path[1].name) + '</div>';
       }
+      html += renderFolderCardGrid(dirs);
     }
 
     // ── Track table ──
@@ -1769,7 +1950,7 @@ var app = (function() {
 
     // Fetch playlists for the submenu
     api.listPlaylists().then(function(data) {
-      var pls = data.playlists || [];
+      var pls = (data.playlists || []).filter(canEditPlaylist);
       var html = '';
       for (var i = 0; i < pls.length; i++) {
         html += '<button class="dropdown-item" data-action="add-to" data-plid="' + pls[i].id + '">' + escapeHtml(pls[i].name) + '</button>';
@@ -1821,7 +2002,7 @@ var app = (function() {
     }
 
     api.listPlaylists().then(function(data) {
-      var pls = data.playlists || [];
+      var pls = (data.playlists || []).filter(canEditPlaylist);
       if (pls.length === 0) {
         // No playlists — create one
         var folderName = dir ? dir.split('/').pop() : 'New playlist';
@@ -1920,7 +2101,7 @@ var app = (function() {
     });
 
     api.listPlaylists().then(function(data) {
-      var pls = data.playlists || [];
+      var pls = (data.playlists || []).filter(canEditPlaylist);
       if (pls.length === 0) {
         promptNewPlaylistAndAdd(tracks);
       } else {
@@ -2119,9 +2300,16 @@ function loadPlaylists() {
     });
   }
 
+  function canEditPlaylist(pl) {
+    if (!pl) return false;
+    if (authState.isAdmin) return true;
+    return !!pl.createdBy && pl.createdBy === authState.username;
+  }
+
   function renderPlaylistDetail() {
     var pl = state.currentPlaylist;
     if (!pl) return;
+    var canEdit = canEditPlaylist(pl);
 
     if (dom.header) dom.header.style.display = 'none';
     var count = pl.tracks ? pl.tracks.length : 0;
@@ -2147,13 +2335,13 @@ function loadPlaylists() {
     html += '</div></div>';
     html += '<div class="album-detail-actions">';
     html += '<button class="album-play-all-btn" id="playlist-play-all" aria-label="Play all" title="Play all">' + PI(28) + '</button>';
-    html += '<button class="playlist-action-btn playlist-more-btn" id="playlist-more" aria-label="More">•••</button>';
+    if (canEdit) html += '<button class="playlist-action-btn playlist-more-btn" id="playlist-more" aria-label="More">•••</button>';
     html += '</div>';
 
     if (!pl.tracks || pl.tracks.length === 0) {
       html += '<div class="empty-state">No tracks</div>';
     } else {
-      html += '<div class="track-head"><span class="th-num">#</span><span class="th-title">Title</span><span class="th-album">Album</span><span class="th-dur">' + CLOCK_GLYPH + '</span><span class="th-more"></span></div>';
+      html += '<div class="track-head"><span class="th-num">#</span><span class="th-title">Title</span><span class="th-album">Album</span><span class="th-dur">' + CLOCK_GLYPH + '</span>' + (canEdit ? '<span class="th-more"></span>' : '') + '</div>';
       html += '<div class="items-list track-list">';
       for (var i = 0; i < pl.tracks.length; i++) {
         var track = pl.tracks[i];
@@ -2162,7 +2350,7 @@ function loadPlaylists() {
         var tartist = track.artist || (track.metadata && track.metadata.artist) || '';
         var tdur = track.duration || (track.metadata && track.metadata.duration);
         html += '<div class="item item-file track-row' + (isCurrent ? ' currently-playing' : '') + (isCurrent && state.isPlaying ? ' row-playing' : '') + '" data-idx="' + i + '" data-path="' + escapeHtml(track.path) + '">';
-        html += '<span class="pl-drag-handle" data-reorder-handle aria-label="Reorder">' + GRIP_SVG + '</span>';
+        if (canEdit) html += '<span class="pl-drag-handle" data-reorder-handle aria-label="Reorder">' + GRIP_SVG + '</span>';
         html += '<div class="track-num"><span class="track-num-index">' + (i + 1) + '</span>' + EQ_HTML + '<button class="track-num-play" data-action="play-track" aria-label="Play">' + PI(14) + '</button></div>';
         html += '<img class="item-thumb" src="' + api.getCoverUrl(track.path) + '" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">';
         html += '<div class="item-icon item-fallback-note" style="display:none">♫</div>';
@@ -2172,7 +2360,7 @@ function loadPlaylists() {
         var albumPath = track.path.substring(0, track.path.lastIndexOf('/'));
         html += '<span class="item-album album-link" data-album-path="' + escapeHtml(albumPath) + '">' + escapeHtml(track.album || albumPath.split('/').pop() || '') + '</span>';
         if (tdur) html += '<span class="item-duration">' + formatTime(tdur) + '</span>';
-        html += '<button class="btn-more" data-action="more-track" aria-label="More">•••</button>';
+        if (canEdit) html += '<button class="btn-more" data-action="more-track" aria-label="More">•••</button>';
         html += '</div>';
       }
       html += '</div>';
@@ -2183,7 +2371,7 @@ function loadPlaylists() {
     // Attach handlers
     setTimeout(function() {
       showHeaderBack(loadPlaylists);
-      setupPlaylistReorder(pl);
+      if (canEdit) setupPlaylistReorder(pl);
 
       var playAllBtn = document.getElementById('playlist-play-all');
       if (playAllBtn) playAllBtn.addEventListener('click', function() {
@@ -2391,11 +2579,15 @@ function loadPlaylists() {
   }
 
   function playFromQueue(index) {
-    if (index < 0 || index >= state.queue.length) return false;
+    if (index < 0 || index >= state.queue.length) { dbg('q:badIndex', { index: index, len: state.queue.length }); return false; }
+    dbg('q:play', { index: index, len: state.queue.length, of: index + 1 });
+    _dbgLastTu = 0;
     state.queueIndex = index;
     var item = state.queue[index];
     state.nowPlaying = { path: item.path, name: item.name };
     state.isPlaying = false;
+    state.playIntent = true;
+    state.endHandled = false;
     renderNowPlaying();
     loadNowPlayingMetadata();
 
@@ -2415,6 +2607,7 @@ function loadPlaylists() {
         recordRecentPlay(state.queue[state.queueIndex].path, state.queue[state.queueIndex].name);
       }
     }).catch(function(err) {
+      dbg('q:playRejected', { attempt: attempt, name: err && err.name, msg: err && err.message, snap: dbgSnapshot() });
       if (attempt < 3 && state.nowPlaying) {
         setTimeout(function() { _playWithRetry(attempt + 1); }, 1000 * (attempt + 1));
       } else {
@@ -2424,21 +2617,17 @@ function loadPlaylists() {
   }
 
   function recordRecentPlay(path, name) {
-    try {
-      var recent = JSON.parse(localStorage.getItem('sannmusic_recent') || '[]');
-      for (var i = 0; i < recent.length; i++) {
-        if (recent[i].path === path) { recent.splice(i, 1); break; }
-      }
-      var entry = { path: path, name: name, timestamp: Date.now() };
-      if (state.nowPlaying && state.nowPlaying.tags) {
-        if (state.nowPlaying.tags.title) entry.title = state.nowPlaying.tags.title;
-        if (state.nowPlaying.tags.artist) entry.artist = state.nowPlaying.tags.artist;
-      }
-      recent.unshift(entry);
-      if (recent.length > 20) recent = recent.slice(0, 20);
-      localStorage.setItem('sannmusic_recent', JSON.stringify(recent));
-      state.recentPlays = recent;
-    } catch(e) {}
+    var entry = { path: path, name: name, timestamp: Date.now() };
+    if (state.nowPlaying && state.nowPlaying.tags) {
+      if (state.nowPlaying.tags.title) entry.title = state.nowPlaying.tags.title;
+      if (state.nowPlaying.tags.artist) entry.artist = state.nowPlaying.tags.artist;
+    }
+    var recent = state.recentPlays.filter(function(r) { return r.path !== path; });
+    recent.unshift(entry);
+    state.recentPlays = recent.slice(0, 20);
+    api.addRecent([entry]).then(function(data) {
+      state.recentPlays = data.tracks || state.recentPlays;
+    }).catch(function() {});
   }
 
   function playNextInQueue(allowWrap) {
@@ -2549,13 +2738,7 @@ function loadPlaylists() {
     dom.npShuffleBtn.classList.toggle('active', state.shuffle);
 
     // Repeat indicator
-    if (state.repeat === 1) {
-      dom.npRepeatIcon.style.display = 'none';
-      dom.npRepeatOne.style.display = '';
-    } else {
-      dom.npRepeatIcon.style.display = '';
-      dom.npRepeatOne.style.display = 'none';
-    }
+    dom.npRepeatOne.style.display = state.repeat === 1 ? '' : 'none';
     dom.npRepeatBtn.classList.toggle('active', state.repeat > 0);
 
     // Like button
@@ -2580,8 +2763,10 @@ function loadPlaylists() {
   dom.npPlayBtn.addEventListener('click', function() {
     if (!state.nowPlaying) return;
     if (state.isPlaying) {
+      state.playIntent = false;
       audio.pause();
     } else {
+      state.playIntent = true;
       audio.play().catch(function() {});
     }
   });
@@ -2651,6 +2836,7 @@ function loadPlaylists() {
     if (!audio.duration) return;
     var rect = this.getBoundingClientRect();
     var pct = (e.clientX - rect.left) / rect.width;
+    state.endHandled = false; // seeking back must let the track end again
     audio.currentTime = pct * audio.duration;
   });
 
@@ -2802,9 +2988,11 @@ function loadPlaylists() {
     });
 
     navigator.mediaSession.setActionHandler('play', function() {
+      state.playIntent = true;
       audio.play().catch(function() {});
     });
     navigator.mediaSession.setActionHandler('pause', function() {
+      state.playIntent = false;
       audio.pause();
     });
     navigator.mediaSession.setActionHandler('previoustrack', function() {
@@ -2815,6 +3003,7 @@ function loadPlaylists() {
     });
     navigator.mediaSession.setActionHandler('seekto', function(details) {
       if (details.seekTime != null) {
+        state.endHandled = false;
         audio.currentTime = details.seekTime;
       }
     });
@@ -2847,25 +3036,33 @@ function loadPlaylists() {
     }
   });
 
-  // Keepalive: detect and recover from background playback stalls.
-  // When the screen is off, the browser may throttle the page, reject play()
-  // calls, or skip the 'ended' event. This polls every 5s and nudges playback.
+  // Keepalive: recover from background playback stalls. Gated on playIntent,
+  // not isPlaying — a transition that failed mid-flight leaves isPlaying false
+  // and used to make this a no-op, so playback never came back.
   setInterval(function() {
-    if (!state.nowPlaying) return;
-    if (!state.isPlaying && audio.paused) return; // user manually paused
+    dbg('k:tick', dbgSnapshot()); // heartbeat: proves JS is still running
+    if (!state.nowPlaying || !state.playIntent) return;
+    if (!audio.paused && !audio.ended) return; // actually playing
 
-    if (audio.paused || audio.readyState === 0) {
-      // Audio stalled or never loaded — retry current track
+    if (audio.ended || trackNearEnd()) {
+      handleTrackEnd();
+    } else if (audio.paused && audio.currentTime === 0 && audio.readyState <= 1 && !audio.error) {
+      // Next track was set but never started — usually a rejected play().
+      // Skipped when the element carries a MediaError: the source itself is bad
+      // and retrying would hammer the server forever.
       audio.play().catch(function() {});
-    } else if (audio.ended || (audio.duration && audio.currentTime >= audio.duration - 0.5)) {
-      // Track finished but 'ended' event didn't fire while backgrounded
-      audio.dispatchEvent(new Event('ended'));
     }
+    // Otherwise: paused mid-track, i.e. deliberate or the system took audio
+    // focus. Left alone on purpose — resuming would fight the user or a call.
   }, 5000);
 
-  // Retry playback when page becomes visible again
+  // Recover when the user comes back to the app
   document.addEventListener('visibilitychange', function() {
-    if (document.visibilityState === 'visible' && state.nowPlaying && state.isPlaying && audio.paused) {
+    if (document.visibilityState !== 'visible' || !state.nowPlaying || !state.playIntent) return;
+    dbg('w:visible', dbgSnapshot());
+    if (audio.ended || trackNearEnd()) {
+      handleTrackEnd();
+    } else if (audio.paused) {
       audio.play().catch(function() {});
     }
   });
@@ -2880,10 +3077,11 @@ function loadPlaylists() {
       case ' ':
         e.preventDefault();
         if (!state.nowPlaying) return;
-        if (state.isPlaying) audio.pause();
-        else audio.play().catch(function() {});
+        if (state.isPlaying) { state.playIntent = false; audio.pause(); }
+        else { state.playIntent = true; audio.play().catch(function() {}); }
         break;
       case 'ArrowLeft':
+        state.endHandled = false;
         if (e.shiftKey) {
           audio.currentTime = Math.max(0, audio.currentTime - 10);
         } else {
@@ -3366,8 +3564,8 @@ function loadPlaylists() {
         '</div>' +
         '<div id="settings-tabs" style="display:flex;gap:8px;border-bottom:1px solid var(--border);padding-bottom:8px">' +
           '<button class="settings-tab active" data-tab="account">Account</button>' +
-          '<button class="settings-tab" data-tab="about">About</button>' +
           usersTabHtml +
+          '<button class="settings-tab" data-tab="about">About</button>' +
         '</div>' +
         '<div id="settings-account" class="settings-panel active">' +
           '<p style="color:var(--text-dim);font-size:13px;margin:0">Logged in as <strong style="color:var(--text)">' + escapeHtml(authState.username) + '</strong></p>' +
@@ -3379,11 +3577,11 @@ function loadPlaylists() {
           '</div>' +
           '<div id="settings-change-result" style="font-size:13px"></div>' +
         '</div>' +
+        usersPanelHtml +
         '<div id="settings-about" class="settings-panel">' +
-          '<p style="color:var(--text);font-size:13px;line-height:1.7;margin:0">SannMusic was created as an alternative to Navidrome and Gonic self-hosting music streaming server. Offering folder-based music browsing with decluttered Spotify-like UI for easy to use and familiarity. Equipped with LRCLIB API for the lyrics feature. All music in the library is hosted by sannserver from decentralized sources. Developed as an alternative to music streaming to boycott Spotify as it is now being targeted by the BDS Movement, focusing on the CEO\'s military tech investments, partnerships with complicit companies, and low artist pay.</p>' +
+          '<p style="color:var(--text);font-size:13px;line-height:1.7;margin:0">SannMusic was created as an alternative to Navidrome and Gonic self-hosting music streaming server. Offering folder-based music browsing with decluttered Spotify-like UI for easy to use and familiarity. Equipped with LRCLIB API for the lyrics feature. All music in the library is hosted by sannserver from decentralized sources.</p>' +
           '<p style="color:var(--text-dim);font-size:12px;margin:0">Trisan Andrean Putra &copy; 2026 &middot; <a href="https://github.com/trisanap/sannmusic" target="_blank" style="color:var(--accent);text-decoration:none">github.com/trisanap/sannmusic</a></p>' +
         '</div>' +
-        usersPanelHtml +
       '</div>';
     document.body.appendChild(backdrop);
 
@@ -3607,6 +3805,7 @@ function loadPlaylists() {
         dom.settingsBtn.style.display = '';
         hideLoading();
         showBrowser();
+        maybeShowNotice();
         loadHome();
         return loadRoot();
       }).catch(function() {
@@ -3965,11 +4164,24 @@ function loadPlaylists() {
     var t = Date.parse(v);
     return isNaN(t) ? null : t;
   }
+  var LIBRARY_BUCKETS = ['Artists', 'Albums'];
   function loadRecentlyAdded() {
     var c = document.getElementById('home-recently-added');
     if (!c || !api) return;
     api.list('').then(function(data) {
-      var items = (data.items || []).filter(function(it) { return !it.hidden; });
+      // The root holds only the Artists/Albums buckets, so look one level in —
+      // otherwise the section would just show those two folders as "new".
+      var buckets = (data.items || []).filter(function(it) {
+        return it.isDir && LIBRARY_BUCKETS.indexOf(it.name) !== -1;
+      });
+      if (buckets.length === 0) return data.items || [];
+      return Promise.all(buckets.map(function(b) { return api.list(b.path); })).then(function(lists) {
+        var merged = [];
+        lists.forEach(function(l) { merged = merged.concat(l.items || []); });
+        return merged;
+      });
+    }).then(function(all) {
+      var items = (all || []).filter(function(it) { return !it.hidden; });
       var dated = items.filter(function(it) { return getItemDate(it) != null; });
       if (dated.length < 2) { c.innerHTML = ''; return; }
       dated.sort(function(a, b) { return getItemDate(b) - getItemDate(a); });
@@ -4024,7 +4236,7 @@ function loadPlaylists() {
     if (min <= 0) return;
     _sleep.sel = min;
     _sleep.endAt = Date.now() + min * 60000;
-    _sleep.id = setTimeout(function() { audio.pause(); clearSleep(); }, min * 60000);
+    _sleep.id = setTimeout(function() { state.playIntent = false; audio.pause(); clearSleep(); }, min * 60000);
     _sleep.tickId = setInterval(updateSleepBadge, 1000);
     updateSleepBadge();
   }
@@ -4033,7 +4245,7 @@ function loadPlaylists() {
     if (_sleep.id) clearTimeout(_sleep.id);
     if (!audio.duration || !isFinite(audio.duration)) return;
     var rem = audio.duration - audio.currentTime;
-    _sleep.id = setTimeout(function() { audio.pause(); clearSleep(); }, Math.max(200, (rem - 0.4) * 1000));
+    _sleep.id = setTimeout(function() { state.playIntent = false; audio.pause(); clearSleep(); }, Math.max(200, (rem - 0.4) * 1000));
   }
   function setSleepEndOfTrack() {
     clearSleep();
@@ -4296,6 +4508,7 @@ function loadPlaylists() {
       if (!audio.duration) return;
       var r = prog.getBoundingClientRect();
       var pct = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+      state.endHandled = false;
       audio.currentTime = pct * audio.duration;
       fs.progFill.style.width = (pct * 100) + '%';
     }
